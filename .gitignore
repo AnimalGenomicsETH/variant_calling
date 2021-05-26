@@ -1,0 +1,47 @@
+.snakemake/
+__pycache__/
+
+#ignore everything by default
+*
+
+#except for
+
+!Snakefile
+
+!snakepit
+snakepit/*
+!snakepit/*.smk
+
+!config
+config/*
+!config/*.yaml
+
+!scripts
+scripts/*
+!scripts/*.py
+!scripts/*.css
+
+!src
+src/*
+!src/Makefile
+!src/fasterqc.c
+
+!.github
+.github/*
+!.github/workflows
+.github/workflows/*
+!.github/workflows/*.yaml
+
+!.test
+!.test/*
+!.test/sire
+!.test/sire/*
+!.test/dam
+!.test/dam/*
+!.test/offspring
+!.test/offspring/*
+!.test/snakepit
+!.test/snakepit/*
+../.gitignore (END)
+
+
