@@ -35,3 +35,44 @@ sed -i '/20\t56749303/d' HD_chip.removed.vcf
 sed -i '/21\t8765426/d' HD_chip.removed.vcf 
 sed -i '/26\t51144437/d' HD_chip.removed.vcf 
 ```
+
+
+## Results
+
+### Genotype concordance
+
+Note that Specificity is calculated based on the quantity of false positives. I believe these count for calls from sequencing not found in the chip truth, i.e. we find many "FPs" because the sequencing approach generates more calls.
+
+| Caller | Sensitivity | Specificity | F1       | GC       |
+|--------|-------------|-------------|----------|----------|
+| DV     | 0.989905    | 0.392515    | 0.11259  | 0.998023 |
+| GATK   | 0.919109    | 0.408594    | 0.109807 | 0.998539 |
+| % diff | 7.4%        | 4.0%        | 2.5%     | 0.05%    |
+
+**NOTE** does this take into account the underlying prediction, or only the genotype? Appears to be latter.
+
+### Call validation
+
+Comparison to chip data as "truth"
+
+| Call   | n Var    | avg Q | SNP Base | SNP Pos | Indel Pos |
+|--------|----------|---------|-----------|---|---|
+| Shared |    13.2m   | 56.7/7520 | 0.0407  | 0.0414  | 0.0014    |
+| DV     |       839k   | 44.8 | 0.0341   | 0.0349  | 0.003     |
+| GATK   |        441k  | 3629 | 0.00014  | 0.00092 | 0.0413737 |
+
+DV and shared have similar profiles, while GATK is much lower.
+
+Exclusive
+![image](https://user-images.githubusercontent.com/29678761/119689647-50a7db00-be49-11eb-999d-f62daaec1876.png)
+Missing
+![image](https://user-images.githubusercontent.com/29678761/119689744-64ebd800-be49-11eb-953b-7e5f0a64b77a.png)
+Shared
+![image](https://user-images.githubusercontent.com/29678761/119689844-7b922f00-be49-11eb-883a-e79869652959.png)
+
+
+
+
+
+
+
