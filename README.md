@@ -4,6 +4,15 @@
 
 Merged autosomes from HD chip, other chips contributed very small amount of non-redundant sites
 
+#### ID mapping
+```
+TRUTH sample -> bam sample
+BSWCHEF120071057962 -> BSWCHEF120071057962
+BSWCHEM110514060086 -> RM1894
+BSWUSAM000000168052 -> RM1896
+BSWUSAM000000186594 -> RM1899
+```
+
 
 #### Edits due to mismatch of reference and panel
 
