@@ -17,6 +17,7 @@ BSWUSAM000000186594 -> RM1899
 #### Edits due to mismatch of reference and panel
 
 ```
+sed -i '/2\t54425845/d' HD_chip.removed.vcf
 sed -i '/2\t123539540/d' HD_chip.removed.vcf 
 sed -i '/4\t36292062/d' HD_chip.removed.vcf 
 sed -i '/9\t84677057/d' HD_chip.removed.vcf 
@@ -70,7 +71,21 @@ Missing
 Shared
 ![image](https://user-images.githubusercontent.com/29678761/119689844-7b922f00-be49-11eb-883a-e79869652959.png)
 
+### Options to consider
+Look at only `HET_REF_VAR1	MISSING` or `HOM_VAR1 HOM_VAR1` like calls. This uses the matching information, and the other fields are small in comparison.
 
+```
+                                      count
+truth        call         caller           
+HET_REF_VAR1 HET_REF_VAR1 DV      192390.00
+                          GATK    192171.00
+             MISSING      DV        1670.50
+                          GATK      2023.25
+HOM_VAR1     HOM_VAR1     DV      198045.00
+                          GATK    170454.25
+             MISSING      DV        1820.25
+                          GATK     29521.00
+```                          
 
 
 
