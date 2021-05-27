@@ -87,7 +87,11 @@ HOM_VAR1     HOM_VAR1     DV      198045.00
                           GATK     29521.00
 ```                          
 
+#### Notes
+DV has setting for filtering 0/0 calls with Q<20 into ./.
 
+> All CNN RefCalls whose GQ is less than this value will have ./. genotype '
+    'instead of 0/0.')
 
 
 
