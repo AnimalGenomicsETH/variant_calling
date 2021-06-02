@@ -137,7 +137,8 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 30000,
+        mem_mb = 50000,
+        walltime = '4:00',
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -149,32 +150,96 @@ rule deepvariant_postprocess:
         --infile {input.variants} \
         --outfile {output.vcf} \
         --gvcf_outfile {output.gvcf} \
-        --nonvariant_site_tfrecord_path {params.gvcf}
+        --nonvariant_site_tfrecord_path {params.gvcf} \
+        --vcf_stats_report False
         '''
 
-rule GLnexus_merge:
+rule split_gvcf_chromosomes:
     input:
-        expand(get_dir('output','{animal}.bwa.g.vcf.gz'),animal=config['animals'])
+        get_dir('output','{animal}.bwa.g.vcf.gz')
     output:
-        get_dir('main','cohort.vcf.gz')
+        temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in range(1,30)))
+    threads: 1
+    resources:
+        mem_mb = 3000,
+        walltime = '25'
+    run:
+        for chromosome in range(1,30):
+            out_file = output[chromosome-1]
+            shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
+            shell(f'tabix -p vcf {out_file}')
+    
+rule GLnexus_merge_chrm:
+    input:
+        (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals'])
+    output:
+        get_dir('main','cohort.{chr}.vcf')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
-    threads: 24 #force using 4 threads for bgziping
+    threads: 12 #force using 4 threads for bgziping
     resources:
-        mem_mb = 5000,
-        disk_scratch = 100,
+        mem_mb = 8000,
+        disk_scratch = 150,
+        walltime = '4:00',
         use_singularity = True
     shell:
         '''
+        ulimit -Sn 4096
         {params.singularity_call} \
         {config[GL_container]} \
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
         --config DeepVariantWGS \
+        --bed /data/BSW_autosome.bed \
+        --threads {threads} \
+        --mem-gbytes {params.mem} \
+        {params.gvcfs} \
+        | bcftools view - > {params.out}"
+        '''
+
+rule aggregate_merge_chrm:
+    input:
+        expand(get_dir('main','cohort.{chr}.vcf'),chr=range(1,30))
+    output:
+        get_dir('main','cohort.autosomes.vcf.gz')
+    threads: 8
+    resources:
+        mem_mb = 2000,
+        walltime = '30'
+    shell:
+        'cat {input} | bgzip -@ {threads} -c > {output}'
+
+
+rule GLnexus_merge:
+    input:
+        expand(get_dir('output','{animal}.bwa.g.vcf.gz'),animal=config['animals'])
+    output:
+        get_dir('main','cohort_120h.vcf.gz')
+    params:
+        gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
+        out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
+        DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
+        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
+    threads: 16 #force using 4 threads for bgziping
+    resources:
+        mem_mb = 4000,
+        disk_scratch = 1750,
+        walltime = "120:00",
+        use_singularity = True
+    shell:
+        '''
+        ulimit -Sn 4096
+        {params.singularity_call} \
+        {config[GL_container]} \
+        /bin/bash -c " /usr/local/bin/glnexus_cli \
+        --dir {params.DB} \
+        --config DeepVariantWGS \
+        --bed /data/BSW_autosome.bed \
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
