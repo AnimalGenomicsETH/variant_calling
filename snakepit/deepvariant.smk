@@ -158,14 +158,15 @@ rule split_gvcf_chromosomes:
     input:
         get_dir('output','{animal}.bwa.g.vcf.gz')
     output:
-        temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in range(1,30)))
+        gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in range(1,30))),
+        tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in range(1,30)))
     threads: 1
     resources:
         mem_mb = 3000,
         walltime = '25'
     run:
         for chromosome in range(1,30):
-            out_file = output[chromosome-1]
+            out_file = output.gvcf[chromosome-1]
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
     
