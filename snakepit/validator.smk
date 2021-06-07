@@ -229,7 +229,7 @@ rule picard_concordance:
         'picard/2.25.4'
     shell:
         '''
-        #picard GenotypeConcordance CALL_VCF={input.query} TRUTH_VCF={input.truth} CALL_SAMPLE={wildcards.sample} TRUTH_SAMPLE={params.ID} O={params.gc_out}
+        picard GenotypeConcordance CALL_VCF={input.query} TRUTH_VCF={input.truth} CALL_SAMPLE={wildcards.sample} TRUTH_SAMPLE={params.ID} O={params.gc_out}
         tail -n 4 {params.gc_out}.genotype_concordance_summary_metrics | awk '$1~/SNP/ {{print $2"\t{wildcards.caller}\t"$10"\t"$12"\t"2*$4*$5/($4+$5)"\t"2*$7*$8/($7+$8)"\t"2*$10*$11/($10+$11)"\t"$13"\t"$14}}' > {output.concordance}
         awk '$1~/SNP/ {{print $3"\t{wildcards.chip}\t{wildcards.caller}\t"$4"\t"$5"\t"$6}}' {params.gc_out}.genotype_concordance_detail_metrics > {output.metrics} 
         '''
@@ -255,3 +255,22 @@ rule aggreate_concordance:
         echo -e "sample\tchip\tcaller\ttruth\tcall\tcount" > {output.df}
         cat {input.metrics} >> {output.df}
         '''
+
+rule plot_concordance:
+    input:
+        'array_concordance/summary.df'
+    output:
+        'array_concordance/summary.png'
+    run:
+        import pandas as pd
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        df = pd.read_csv(input,delimiter='\t')
+        df_no_missing = df[(df['truth']!='MISSING')&(df['call']!='MISSING')]
+        g = sns.catplot(data=df,x='call',y='count',col='truth',col_wrap=2,hue='caller',sharey=False)
+        for ax in g.axes.flatten():
+            ax.set_yscale('log')
+        plt.savefig(output[0])
+        #df2['conc']=df2['truth']==df2['call']
+        #df2.groupby(['caller','conc']).sum()
