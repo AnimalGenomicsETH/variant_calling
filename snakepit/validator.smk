@@ -1,11 +1,5 @@
-#intersect data
-#bcftools isec --threads 4 -p filtered_all ../dedup_alignment/cohort.autosomes.vcf.gz      ../filter_impute/filtered_autosomes_gatk4.vcf.gz
-#grep -v '^#' 0001.vcf | cut -f -5 > GATK.raw
-
-#bcftools view -m2 -M2 -v snps 0001.vcf | awk '$1!~/#/ {print $1"\t"$2"\t"$4"\t"$5}' > GATK.ra
-#awk '$1!~/#/ {print $1"\t"$2"\t"$4"\t"$5}' /cluster/work/pausch/alex/SNP_exclusive.vcf > TRUTH.ra
-#LC_ALL=C fgrep -F -f
-#parallel --pipepart -a shared.ra --block 10M LC_ALL=C fgrep -F -f TRUTH.ra > test.ra
+from pathlib import PurePath
+from itertools import product
 
 wildcard_constraints:
     norm = r'normed|raw',
@@ -13,13 +7,21 @@ wildcard_constraints:
     cols = r'pos_only|bases',
     var = r'snp|indel'
     
-localrules: format_record_tsv, summarise_matches, variant_density
+localrules: format_record_tsv, summarise_matches, variant_density, generate_karyotype
 
+def capture_logic():
+    targets = []
+    
+    
 rule all:
     input:
-        expand('intersection_{norm}_{collapse}.{cols}.{var}.summary.stats',norm=('normed','raw'),collapse=('none','all'),cols=('pos_only','bases'),var='snp'),
-        expand('intersection_{norm}_{collapse}.{cols}.{var}.summary.stats',norm=('normed','raw'),collapse=('none','all'),cols='pos_only',var='indel'),
-        expand('{mode}.{var}.{norm}.{collapse}.ideogram.png',mode=('shared','missing','exclusive'),var='snp',norm='normed',collapse='none')
+        #expand('intersection_{norm}_{collapse}.{cols}.{var}.summary.stats',norm=('normed','raw'),collapse=('none','all'),cols=('pos_only','bases'),var='snp'),
+        #expand('intersection_{norm}_{collapse}.{cols}.{var}.summary.stats',norm=('normed','raw'),collapse=('none','all'),cols='pos_only',var='indel'),
+        expand('intersection_{norm}_{collapse}.{cols}.{var}.summary.stats',norm='normed',collapse='none',cols=('pos_only','bases'),var='snp'),
+        expand('intersection_{norm}_{collapse}.{cols}.{var}.summary.stats',norm='normed',collapse='none',cols='pos_only',var='indel'),
+        expand('{mode}.{var}.{norm}.{collapse}.ideogram.png',mode=('shared','missing','exclusive'),var='snp',norm='normed',collapse='none'),
+        expand('intersection_{norm}_{collapse}/{N}.qc',N=('DV','GATK','shared'),norm='normed',collapse='none'),
+        'array_concordance/summary.txt'
 
 rule bcftools_norm:
     input:
@@ -32,7 +34,10 @@ rule bcftools_norm:
         mem_mb = 2000,
         walltime = '30'
     shell:
-        'bcftools norm --threads {threads} -m- -f {input.ref} -Oz -o {output} {input.vcf}'
+        '''
+        bcftools norm --threads {threads} -m- -f {input.ref} -Oz -o {output} {input.vcf}
+        tabix -p vcf {output}
+        '''
 
 rule bcftools_isec:
     input:
@@ -45,20 +50,20 @@ rule bcftools_isec:
     threads: 4
     resources:
         mem_mb = 2000,
-        walltime = '30'
+        walltime = '45'
     shell:
         '''
         bcftools isec --threads {threads} -c {wildcards.collapse} -p {params} {input.DV} {input.GATK}
-        mv {params}/0000.vcf {params/DV.vcf
+        mv {params}/0000.vcf {params}/DV.vcf
         mv {params}/0001.vcf {params}/GATK.vcf
         mv {params}/0002.vcf {params}/shared.vcf
         '''
 
 rule average_quality:
     input:
-        'intersection_{{norm}}_{{collapse}}/{N}.vcf'
+        'intersection_{norm}_{collapse}/{N}.vcf'
     output:
-        'intersection_{{norm}}_{{collapse}}/{N}.qc'
+        'intersection_{norm}_{collapse}/{N}.qc'
     shell:
         '''
         awk '!/#/ {{c+=$6;j+=1}} END {{print c/j}}' {input} > {output}
@@ -70,7 +75,7 @@ rule format_record_tsv:
     output:
         'intersection_{norm}_{collapse}/{callset}.{cols}.{var}.tsv'
     params:
-        target_cols = lambda wildcards: '$1"\t"$2"\t"$4"\t"$5' if wildcards.cols == 'bases' else '$1"\t"$2',
+        target_cols = lambda wildcards: '$1"\t"$2"\t"$5' if wildcards.cols == 'bases' else '$1"\t"$2',
         v_type = lambda wildcards: '-m2 -M2 -v snps' if wildcards.var == 'snp' else '-m2 -M2 -v indels'
     shell:
         '''
@@ -86,7 +91,7 @@ rule format_truth_tsv:
         target_cols = lambda wildcards: '$1"\t"$2"\t"$4"\t"$5' if wildcards.cols == 'bases' else '$1"\t"$2'
     shell:
         '''
-        awk '$1!~/#/ {{print {params.target_cols}}}' {input} > {output}
+        zcat {input} | awk '$1!~/#/ {{print {params.target_cols}}}' > {output}
         '''
 
 rule count_matches:
@@ -97,7 +102,8 @@ rule count_matches:
         'intersection_{norm}_{collapse}/{callset}.{cols}.{var}.matches.count'
     threads: 8 #lambda wildcards, input: int(max(input.size_mb,1))
     resources:
-        mem_mb = 3000,
+        mem_mb = 5000,
+        disk_scratch = 10,
         walltime = '15'
     shell:
         '''
@@ -109,9 +115,9 @@ rule truth_only_positions:
         variants = expand('intersection_{{norm}}_{{collapse}}/{callset}.{{cols}}.snp.tsv',callset=('shared','DV','GATK')),
         truth = 'truth.{cols}.tsv' #lambda wildcards: config['truth'][wildcards.cols]
     output:
-        missing = 'intersection_{norm}_{collapse}/missing_truth.{cols}.snp.tsv',
-        query = temp('intersection_{norm}_{collapse}/missing_temp.var'),
-        truth = temp('intersection_{norm}_{collapse}/truth_temp.tsv')
+        missing = 'intersection_{norm}_{collapse}/missing.{cols}.snp.tsv',
+        query = temp('intersection_{norm}_{collapse}/missing_temp.{cols}.var'),
+        truth = temp('intersection_{norm}_{collapse}/truth_temp.{cols}.tsv')
     threads: 8
     resources:
         mem_mb = 3000,
@@ -158,12 +164,12 @@ rule variant_density:
     run:
         window = 100000
         with open(output[0],'w') as fout:
-            if wildcards.mode == 'shared':
+            if wildcards.mode != 'exclusive':
                 fout.write('\t'.join(('Chr','Start','End','Value','Color')) + '\n')
                 counts = get_density_counts(input[0],window)
                 for (chr,pos),value in counts.items():
                     pos *= window
-                    fout.write('\t'.join(map(str,(chr,pos,pos+window,value,'17A589'))) + '\n')
+                    fout.write('\t'.join(map(str,(chr,pos,pos+window,value,'17A589' if wildcards.mode == 'shared' else 'A51733'))) + '\n')
 
             else:
                 fout.write('\t'.join(('Chr','Start','End','Value_1','Color_1','Value_2','Color_2')) + '\n')
@@ -191,29 +197,61 @@ rule plot_density:
         features = 'intersection_{norm}_{collapse}/{mode}.{var}.ideogram.tsv',
     output:
         '{mode}.{var}.{norm}.{collapse}.ideogram.png'
+    params:
+        lambda wildcards, output: PurePath(output[0]).with_suffix('')
     shell:
-        'Rscript --vanilla {workflow.basedir}/../scripts/ideogram_plotter.R {input.karotype} {input.features} --output {output}'
+        'Rscript --vanilla {workflow.basedir}/../scripts/ideogram_plotter.R {input.karotype} {input.features} --output {params}'
 
+rule get_snps:
+    input:
+        '{caller}.normed.vcf.gz'
+    output:
+        '{caller}.normed.snp.vcf'
+    shell:
+        'bcftools view -m2 -M2 -v snps -o {output} {input}'
 
 rule picard_concordance:
     input:
-        DV = 'DV.normed.vcf.gz',
-        GATK = 'GATK.normed.vcf.gz'
+        query = lambda wildcards: f'{wildcards.caller}.normed.snp.vcf',
+        truth = lambda wildcards: config['chips'][wildcards.chip]['vcf']
     output:
-        'HD_concordance/{sample}.{caller}.conc'
+        concordance = 'array_concordance/{sample}.{chip}.{caller}.conc',
+        metrics = 'array_concordance/{sample}.{chip}.{caller}.metrics'
+    params:
+        ID = lambda wildcards: config['chips'][wildcards.chip][wildcards.sample],
+        gc_out = lambda wildcards,output: PurePath(output[0]).parent / f'{wildcards.sample}_{wildcards.caller}'
+    threads: 1
+    resources:
+        mem_mb = 25000,
+        walltime = '60'
+    envmodules:
+        'gcc/8.2.0',
+        'picard/2.25.4'
     shell:
         '''
-        #picard GenotypeConcordance CALL_VCF={input.GATK} TRUTH_VCF={input.DV} CALL_SAMPLE={wildcards.sample} TRUTH_SAMPLE={wildcards.sample} O={wildcards.sample}
-        tail -n 4 HD_concordance/{wildcards.sample}_{wildcards.caller}.genotype_concordance_summary_metrics | awk '$1~/SNP/ {{print $2"\t{wildcards.caller}\t"$10"\t"$12"\t"2*$4*$5/($4+$5)"\t"2*$7*$8/($7+$8)"\t"2*$10*$11/($10+$11)"\t"$13"\t"$14}}' > {output}
+        #picard GenotypeConcordance CALL_VCF={input.query} TRUTH_VCF={input.truth} CALL_SAMPLE={wildcards.sample} TRUTH_SAMPLE={params.ID} O={params.gc_out}
+        tail -n 4 {params.gc_out}.genotype_concordance_summary_metrics | awk '$1~/SNP/ {{print $2"\t{wildcards.caller}\t"$10"\t"$12"\t"2*$4*$5/($4+$5)"\t"2*$7*$8/($7+$8)"\t"2*$10*$11/($10+$11)"\t"$13"\t"$14}}' > {output.concordance}
+        awk '$1~/SNP/ {{print $3"\t{wildcards.chip}\t{wildcards.caller}\t"$4"\t"$5"\t"$6}}' {params.gc_out}.genotype_concordance_detail_metrics > {output.metrics} 
         '''
+
+def ID_concordances():
+    targets = []
+    for chip,keys in config['chips'].items():
+        for sample in list(keys.keys())[1:]:
+            targets.append(f'{sample}.{chip}')
+    return targets
 
 rule aggreate_concordance:
     input:
-        expand('HD_concordance/{sample}.{caller}.conc',sample=('RM1894','RM1896','RM1899','BSWCHEF120071057962'),caller=('DV','GATK'))
+        concordance = expand('array_concordance/{ID}.{caller}.conc',ID=ID_concordances(),caller=('DV','GATK')),
+        metrics = expand('array_concordance/{ID}.{caller}.metrics',ID=ID_concordances(),caller=('DV','GATK'))
     output:
-        'HD_concordance/summary.txt'
+        summary = 'array_concordance/summary.txt',
+        df = 'array_concordance/summary.df'
     shell:
         '''
-        echo -e "sample\tcaller\tSensitivity\tSpecificity\tHET F1\tHOMV F1\tVAR F1\tGC\tnR-GC" > {output}
-        sort -k 13,13nr -k 11,11nr {input} >> {output}
+        echo -e "sample\tcaller\tSensitivity\tSpecificity\tHET F1\tHOMV F1\tVAR F1\tGC\tnR-GC" > {output.summary}
+        sort -k 13,13nr -k 11,11nr {input.concordance} >> {output.summary}
+        echo -e "sample\tchip\tcaller\ttruth\tcall\tcount" > {output.df}
+        cat {input.metrics} >> {output.df}
         '''

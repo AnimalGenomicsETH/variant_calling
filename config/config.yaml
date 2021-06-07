@@ -30,8 +30,34 @@ samples:
   RM1905: ""
   RM1907: ""
 
-truth_maps:
-  BSWCHEF120071057962: "BSWCHEF120071057962"
-  RM1894: "BSWCHEM110514060086"
-  RM1896: "BSWUSAM000000168052"
-  RM1899: "BSWUSAM000000186594"
+chips:
+  hd:
+    vcf: '/cluster/work/pausch/alex/chip_hd.filtered.vcf.gz'
+    BSWCHEF120071057962: "BSWCHEF120071057962"
+    RM1894: "BSWCHEM110514060086"
+    RM1896: "BSWUSAM000000168052"
+    RM1899: "BSWUSAM000000186594"
+  150k:
+    vcf: '/cluster/work/pausch/alex/chip_150k.filtered.vcf.gz'
+    RM1904: "BSWCHEM120110758232"
+  50kv1:
+    vcf: '/cluster/work/pausch/alex/chip_50kv1.filtered.vcf.gz'
+    RM1898: "BSWITAMTA0000155941"
+    RM1902: "BSWCHEM120059531446"
+    RM1903: "BSWCHEM120062350447"
+    #RM1908: "BSWCHEM110064090335"
+  50kv2:
+    vcf: '/cluster/work/pausch/alex/chip_50kv2.filtered.vcf.gz'
+    RM1900: "BSWCHEM120053210071"
+    RM1901: "BSWCHEM120116520307"
+    RM1905: "BSWCHEM120098390639"
+    RM1906: "BSWCHEM120102938123"
+    RM2009: "BSWCHEM120100763062"
+  47k:
+    vcf: '/cluster/work/pausch/alex/chip_47k.filtered.vcf.gz'
+    BSWCHEF120121047356: "BSWCHEF120121047356"
+    BSWCHEF120130256848: "BSWCHEF120130256848"
+  30k:
+    vcf: '/cluster/work/pausch/alex/chip_30k.filtered.vcf.gz'
+    BSWCHEF120127240430: "BSWCHEF120127240430"
+    BSWCHEF120127770289: "BSWCHEF120127770289"
