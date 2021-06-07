@@ -1,0 +1,37 @@
+ref: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
+vcf:
+    DV: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/dedup_alignment/cohort.autosomes.vcf.gz'
+    GATK: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/filter_impute/filtered_autosomes_gatk4.vcf.gz'
+truth: '/cluster/work/pausch/alex/HD_chip.filtered.vcf.gz'
+
+samples:
+  BSWCHEF120071057962: ""
+  BSWCHEF120121047356: ""
+  BSWCHEF120127240430: ""
+  BSWCHEF120130256848: ""
+  BSWCHEM120066947247: ""
+  RM1894: ""
+  RM1897: ""
+  RM1898: ""
+  RM1900: ""
+  RM1902: ""
+  RM1904: ""
+  RM1906: ""
+  RM2009: ""
+  BSWCHEF120104805454: ""
+  BSWCHEF120124686545: ""
+  BSWCHEF120127770289: ""
+  BSWCHEM120057745616: ""
+  BSWCHEM120079379790: ""
+  RM1896: ""
+  RM1899: ""
+  RM1901: ""
+  RM1903: ""
+  RM1905: ""
+  RM1907: ""
+
+truth_maps:
+  BSWCHEF120071057962: "BSWCHEF120071057962"
+  RM1894: "BSWCHEM110514060086"
+  RM1896: "BSWUSAM000000168052"
+  RM1899: "BSWUSAM000000186594"
