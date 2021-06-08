@@ -1,8 +1,6 @@
+## variant calling
 ref: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
-vcf:
-    DV: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/dedup_alignment/cohort.autosomes.vcf.gz'
-    GATK: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/filter_impute/filtered_autosomes_gatk4.vcf.gz'
-truth: '/cluster/work/pausch/alex/HD_chip.filtered.vcf.gz'
+bam_path: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/BSW_remap/dedup_alignment'
 
 samples:
   BSWCHEF120071057962: ""
@@ -29,6 +27,13 @@ samples:
   RM1903: ""
   RM1905: ""
   RM1907: ""
+
+
+## validation stats
+vcf:
+  DV: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/dedup_alignment/cohort.autosomes.vcf.gz'
+  GATK: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/filter_impute/filtered_autosomes_gatk4.vcf.gz'
+truth: '/cluster/work/pausch/alex/HD_chip.filtered.vcf.gz'
 
 chips:
   hd:

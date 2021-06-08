@@ -7,7 +7,7 @@ class Default(dict):
 
 def get_dir(base='work',ext='', **kwargs):
     if base == 'input':
-        base_dir = '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/BSW_remap/dedup_alignment/{animal}'
+        base_dir = config.get('bam_path','')
     elif base == 'output':
         base_dir = 'output'
     elif base == 'work':
@@ -51,7 +51,7 @@ def make_singularity_call(wildcards,extra_args='',tmp_bind='$TMPDIR',input_bind=
     return call
 
 for dir_ in ('input','output','work'):
-    for animal,reference in product(config['animals'],config['references']):
+    for animal,reference in product(config['animals'],config['reference']):
         Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
 rule all:
@@ -60,7 +60,7 @@ rule all:
 
 rule deepvariant_make_examples:
     input:
-        ref = multiext(config['references']['BSW'],'','.fai'),
+        ref = multiext(config['reference'],'','.fai'),
         bam = multiext(get_dir('input','{animal}.bam'),'','.bai')
     output:
         example = temp(get_dir('work','make_examples.tfrecord-{N}-of-{sharding}.gz')),
@@ -71,7 +71,8 @@ rule deepvariant_make_examples:
         phase_args = lambda wildcards: '--parse_sam_aux_fields={i} --sort_by_haplotypes={i}'.format(i=('true' if False else 'false')),
         model_args = lambda wildcards: '--add_hp_channel --alt_aligned_pileup diff_channels --realign_reads=false --vsc_min_fraction_indels 0.12' if 'bwa' == 'pbmm2' else '',
         singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/'),
-        ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}'
+        ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
+        regions = ' '.join(map(str,range(1,30)))
     threads: 1
     resources:
         mem_mb = 6000,
@@ -91,6 +92,7 @@ rule deepvariant_make_examples:
         {params.model_args} \
         {params.phase_args} \
         --task {wildcards.N}
+        #--regions {params.regions}
         '''
 
 rule deepvariant_call_variants:
@@ -105,12 +107,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 16
+    threads: 32
     resources:
-        mem_mb = 2000,
+        mem_mb = 4000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '24:00'
+        walltime = lambda wildcards: '4:00'
     shell:
         '''
         {params.singularity_call} \
@@ -124,7 +126,7 @@ rule deepvariant_call_variants:
 
 rule deepvariant_postprocess:
     input:
-        ref = multiext(config['references']['BSW'],'','.fai'),
+        ref = multiext(config['reference'],'','.fai'),
         variants = get_dir('work','call_variants_output.tfrecord.gz'),
         gvcf = (get_dir('work', f'gvcf.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
     output:
@@ -137,7 +139,7 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 50000,
+        mem_mb = 40000,
         walltime = '4:00',
         disk_scratch = 1,
         use_singularity = True
@@ -174,7 +176,7 @@ rule GLnexus_merge_chrm:
     input:
         (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        get_dir('main','cohort.{chr}.vcf')
+        temp(get_dir('main','cohort.{chr}.vcf'))
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
@@ -195,42 +197,45 @@ rule GLnexus_merge_chrm:
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
         --config DeepVariantWGS \
-        --bed /data/BSW_autosome.bed \
+        #--bed /data/BSW_autosome.bed \
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
-        | bcftools view - > {params.out}"
+        | bcftools view - | bgzip -@ 4 -c > {params.out}"
         '''
 
 rule aggregate_merge_chrm:
     input:
-        expand(get_dir('main','cohort.{chr}.vcf'),chr=range(1,30))
+        expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=range(1,30))
     output:
-        get_dir('main','cohort.autosomes.vcf.gz')
+        temp = get_dir('main','cohort.temp.vcf'),
+        vcf = get_dir('main','cohort.autosomes.vcf.gz')
     threads: 8
     resources:
         mem_mb = 2000,
         walltime = '30'
     shell:
-        'cat {input} | bgzip -@ {threads} -c > {output}'
-
+        '''
+        zgrep "#" {input[0]} > {output.temp}
+        zgrep -v "#" {input} | cat {output.temp} - | bgzip -@ {threads} -c > {output.vcf}
+        '''
 
 rule GLnexus_merge:
     input:
         expand(get_dir('output','{animal}.bwa.g.vcf.gz'),animal=config['animals'])
     output:
-        get_dir('main','cohort_120h.vcf.gz')
+        get_dir('main','cohort.vcf.gz')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
-    threads: 16 #force using 4 threads for bgziping
+    threads: 24 #force using 4 threads for bgziping
     resources:
         mem_mb = 4000,
-        disk_scratch = 1750,
-        walltime = "120:00",
+        disk_scratch = 500,
+        walltime = "4:00",
         use_singularity = True
     shell:
         '''
@@ -240,9 +245,9 @@ rule GLnexus_merge:
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
         --config DeepVariantWGS \
-        --bed /data/BSW_autosome.bed \
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
         '''
+        
