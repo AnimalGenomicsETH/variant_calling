@@ -107,7 +107,7 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 32
+    threads: 36
     resources:
         mem_mb = 4000,
         disk_scratch = 1,
@@ -153,7 +153,7 @@ rule deepvariant_postprocess:
         --outfile {output.vcf} \
         --gvcf_outfile {output.gvcf} \
         --nonvariant_site_tfrecord_path {params.gvcf} \
-        --vcf_stats_report False
+        --novcf_stats_report
         '''
 
 rule split_gvcf_chromosomes:
