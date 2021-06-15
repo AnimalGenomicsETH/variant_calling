@@ -54,9 +54,21 @@ for dir_ in ('input','output','work'):
     for animal,reference in product(config['animals'],config['reference']):
         Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
+def read_trios():
+    import pandas as pd
+    df = pd.read_csv(config['trios'])
+    df.fillna('missing',inplace=True)
+
+    targets = []
+    for _, row in df.iterrows():
+        targets.append(f'mendel/{"_".join(row)}.vcf.gz')
+        targets.append(f'mendel/{"_".join(row)}.mendel.log')
+    return targets
+
 rule all:
     input:
-        get_dir('main','cohort.vcf.gz')
+        read_trios()
+        #get_dir('main','cohort.vcf.gz')
 
 rule deepvariant_make_examples:
     input:
@@ -75,8 +87,8 @@ rule deepvariant_make_examples:
         regions = ' '.join(map(str,range(1,30)))
     threads: 1
     resources:
-        mem_mb = 6000,
-        walltime = '4:00',
+        mem_mb = 10000,
+        walltime = '14:00',
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -107,12 +119,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 36
+    threads: 32
     resources:
         mem_mb = 4000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '4:00'
+        walltime = lambda wildcards: '8:00'
     shell:
         '''
         {params.singularity_call} \
@@ -139,8 +151,8 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 40000,
-        walltime = '4:00',
+        mem_mb = 80000,
+        walltime = '14:00',
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -230,10 +242,10 @@ rule GLnexus_merge:
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1500
     threads: 24 #force using 4 threads for bgziping
     resources:
-        mem_mb = 4000,
+        mem_mb = 7000,
         disk_scratch = 500,
         walltime = "4:00",
         use_singularity = True
@@ -251,3 +263,91 @@ rule GLnexus_merge:
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
         '''
         
+rule GLnexus_merge_families:
+    input:
+        offspring = 'output/{offspring}.bwa.g.vcf.gz',
+        sire  = lambda wildcards: 'output/{sire}.bwa.g.vcf.gz' if wildcards.sire != 'missing' else [],
+        dam = lambda wildcards: 'output/{dam}.bwa.g.vcf.gz' if wildcards.dam != 'missing' else []
+    output:
+        'mendel/{offspring}_{sire}_{dam}.vcf.gz'
+    params:
+        gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
+        out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
+        DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
+        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1500
+    threads: 6
+    resources:
+        mem_mb = 6000,
+        disk_scratch = 50,
+        walltime = '1:00',
+        use_singularity = True
+    shell:
+        '''
+        ulimit -Sn 4096
+        {params.singularity_call} \
+        {config[GL_container]} \
+        /bin/bash -c " /usr/local/bin/glnexus_cli \
+        --dir {params.DB} \
+        --config DeepVariantWGS \
+        --threads {threads} \
+        --mem-gbytes {params.mem} \
+        {params.gvcfs} \
+        | bcftools view - | bgzip -@ 2 -c > {params.out}"
+        '''
+
+rule rtg_pedigree:
+    output:
+        'mendel/{offspring}_{sire}_{dam}.ped'
+    shell:
+        '''
+        FILE={output}
+cat <<EOM >$FILE
+#PED format pedigree
+#
+#fam-id/ind-id/pat-id/mat-id: 0=unknown
+#sex: 1=male; 2=female; 0=unknown
+#phenotype: -9=missing, 0=missing; 1=unaffected; 2=affected
+#
+#fam-id ind-id pat-id mat-id sex phen
+1 {wildcards.offspring} {wildcards.sire} {wildcards.dam} 1 0
+1 {wildcards.sire} 0 0 1 0
+1 {wildcards.dam} 0 0 2 0
+EOM
+        '''
+
+rule rtg_format:
+    input:
+        ref = lambda wildcards: multiext(config['reference'],'','.fai')
+    output:
+        sdf = 'ARS.sdf'
+    params:
+        singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/,.:/data',tmp_bind=False,output_bind=False,work_bind=False),
+        ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
+    shell:
+        '''
+        {params.singularity_call} \
+        {config[RTG_container]} \
+        rtg format -o /data/{output.sdf} {params.ref}
+        '''
+
+rule rtg_mendelian_concordance:
+    input:
+        sdf = 'ARS.sdf',
+        vcf = 'mendel/{offspring}_{sire}_{dam}.vcf.gz',
+        pedigree = 'mendel/{offspring}_{sire}_{dam}.ped'
+    output:
+        temp = temp('mendel/filled_{offspring}_{sire}_{dam}.vcf.gz'),
+        vcf = 'mendel/{offspring}_{sire}_{dam}.inconsistent.vcf.gz',
+        log = 'mendel/{offspring}_{sire}_{dam}.mendel.log'
+    params:
+        vcf_in = lambda wildcards, input: '/data/' + PurePath(input.vcf).name if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data/filled_' + PurePath(input.vcf).name ,
+        vcf_annotated = lambda wildcards, output: '/data/' + PurePath(output.vcf).name,
+        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
+    shell:
+        '''
+        bcftools merge --no-index -o {output.temp} -Oz {input.vcf} {config[missing_template]}
+        {params.singularity_call} \
+        {config[RTG_container]} \
+        rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree={input.pedigree} -t {input.sdf} > {output.log}
+        '''
