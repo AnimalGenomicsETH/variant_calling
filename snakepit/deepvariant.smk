@@ -54,15 +54,14 @@ for dir_ in ('input','output','work'):
     for animal,reference in product(config['animals'],config['reference']):
         Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
-def read_trios():
+def read_trios(ext='.vcf.gz'):
     import pandas as pd
     df = pd.read_csv(config['trios'])
     df.fillna('missing',inplace=True)
 
     targets = []
     for _, row in df.iterrows():
-        targets.append(f'mendel/{"_".join(row)}.vcf.gz')
-        targets.append(f'mendel/{"_".join(row)}.mendel.log')
+        targets.append(f'mendel/{"_".join(row)}{ext}')
     return targets
 
 rule all:
@@ -272,15 +271,15 @@ rule GLnexus_merge_families:
         'mendel/{offspring}_{sire}_{dam}.vcf.gz'
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
-        out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
+        out = lambda wildcards, output: '/data' / PurePath(output[0]),
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1500
-    threads: 6
+    threads: 8
     resources:
         mem_mb = 6000,
         disk_scratch = 50,
-        walltime = '1:00',
+        walltime = '4:00',
         use_singularity = True
     shell:
         '''
@@ -339,15 +338,52 @@ rule rtg_mendelian_concordance:
     output:
         temp = temp('mendel/filled_{offspring}_{sire}_{dam}.vcf.gz'),
         vcf = 'mendel/{offspring}_{sire}_{dam}.inconsistent.vcf.gz',
+        stats = 'mendel/{offspring}_{sire}_{dam}.inconsistent.stats',
         log = 'mendel/{offspring}_{sire}_{dam}.mendel.log'
     params:
-        vcf_in = lambda wildcards, input: '/data/' + PurePath(input.vcf).name if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data/filled_' + PurePath(input.vcf).name ,
-        vcf_annotated = lambda wildcards, output: '/data/' + PurePath(output.vcf).name,
+        vcf_in = lambda wildcards, input: '/data' / PurePath(input.vcf) if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data/mendel/filled_' + PurePath(input.vcf).name,
+        vcf_annotated = lambda wildcards, output: '/data' / PurePath(output.vcf),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
+    threads: 1
+    resources:
+        mem_mb = 10000,
+        walltime = '30'
     shell:
         '''
         bcftools merge --no-index -o {output.temp} -Oz {input.vcf} {config[missing_template]}
         {params.singularity_call} \
         {config[RTG_container]} \
-        rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree={input.pedigree} -t {input.sdf} > {output.log}
+        /bin/bash -c "rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.log}"
+        bcftools stats {output.vcf} | grep "^SN" > {output.stats}
         '''
+
+rule mendel_summary:
+    input:
+        logs = read_trios('.mendel.log'),
+        stats = read_trios('.inconsistent.stats')
+    output:
+        'mendel.summary.df'
+    run:
+        import pandas as pd
+
+        rows = []
+        for log_in, stat_in in zip(input.logs,input.stats):
+            rows.append({k:v for k,v in zip(('offspring','sire','dam'),PurePath(log_in).with_suffix('').with_suffix('').name.split('_'))})
+            with open(log_in,'r') as fin:
+                for line in fin:
+                    if 'violation of Mendelian constraints' in line:
+                        violate, total = (int(i) for i in line.split()[0].split('/'))
+                        rows[-1]['violate'] = violate
+                        rows[-1]['total'] = total
+            with open(stat_in,'r') as fin:
+                for line in fin:
+                    if 'number of SNPs' in line:
+                        rows[-1]['SNP'] = int(line.rstrip().split()[-1])
+                    elif 'number of indels' in line:
+                        rows[-1]['indel'] = int(line.rstrip().split()[-1])
+        
+        df = pd.DataFrame(rows)
+        df['rate']=df['violate']/df['total']
+        df['duo']=(df == 'missing').any(axis=1)
+        df.to_csv(output[0],index=False)
+
