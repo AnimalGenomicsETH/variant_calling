@@ -12,6 +12,8 @@ def get_dir(base='work',ext='', **kwargs):
         base_dir = 'output'
     elif base == 'work':
         base_dir = get_dir('output','intermediate_results_{animal}',**kwargs)
+    elif base == 'mendel':
+        base_dir = 'mendel'
     elif base == 'main':
         base_dir = ''
     else:
@@ -54,20 +56,27 @@ for dir_ in ('input','output','work'):
     for animal,reference in product(config['animals'],config['reference']):
         Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
+
+def capture_logic():
+    if trios in config:
+        return read_trios()
+    else:
+        return [get_dir('main','cohort.autosomes.vcf.gz')]
+
 def read_trios(ext='.vcf.gz'):
+
     import pandas as pd
     df = pd.read_csv(config['trios'])
     df.fillna('missing',inplace=True)
 
     targets = []
     for _, row in df.iterrows():
-        targets.append(f'mendel/{"_".join(row)}{ext}')
+        targets.append(get_dir('mendel',f'{"_".join(row)}{ext}'))
     return targets
 
 rule all:
     input:
-        read_trios()
-        #get_dir('main','cohort.vcf.gz')
+        capture_logic()
 
 rule deepvariant_make_examples:
     input:
@@ -185,13 +194,15 @@ rule split_gvcf_chromosomes:
     
 rule GLnexus_merge_chrm:
     input:
-        (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals'])
+        vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
+        tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        temp(get_dir('main','cohort.{chr}.vcf'))
+        temp(multiext(get_dir('main','cohort.{chr}.vcf.gz'),'','.tbi'))
     params:
-        gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
+        gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
+        bed = lambda wildcards: '' if True else '--bed /data/BSW_autosome.bed',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
     threads: 12 #force using 4 threads for bgziping
@@ -208,18 +219,18 @@ rule GLnexus_merge_chrm:
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
         --config DeepVariantWGS \
-        #--bed /data/BSW_autosome.bed \
         --threads {threads} \
         --mem-gbytes {params.mem} \
-        {params.gvcfs} \
+        {params.bed} {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
+        tabix -p vcf {output[0]}
         '''
 
 rule aggregate_merge_chrm:
     input:
-        expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=range(1,30))
+        vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=range(1,30)),
+        tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=range(1,30)),
     output:
-        temp = get_dir('main','cohort.temp.vcf'),
         vcf = get_dir('main','cohort.autosomes.vcf.gz')
     threads: 8
     resources:
@@ -227,8 +238,13 @@ rule aggregate_merge_chrm:
         walltime = '30'
     shell:
         '''
-        zgrep "#" {input[0]} > {output.temp}
-        zgrep -v "#" {input} | cat {output.temp} - | bgzip -@ {threads} -c > {output.vcf}
+        bcftools concat --threads {threads} -o {output.vcf} -Oz {input.vcf}
+        tabix -p vcf {output.vcf}
+        #zgrep "#" {input[0]} > {output.temp}
+        #zgrep -v "#" {input} | cat {output.temp} - | bgzip -@ {threads} -c > {output.vcf}
+        #requires indexing, and so not worth it?
+        #bcftools view -h {input[0]} > {output.temp}
+        #bcftools view -H {input} | cat {output.temp} - | bgzip -@ {threads} -c > {output.vcf}
         '''
 
 rule GLnexus_merge:
@@ -268,7 +284,7 @@ rule GLnexus_merge_families:
         sire  = lambda wildcards: 'output/{sire}.bwa.g.vcf.gz' if wildcards.sire != 'missing' else [],
         dam = lambda wildcards: 'output/{dam}.bwa.g.vcf.gz' if wildcards.dam != 'missing' else []
     output:
-        'mendel/{offspring}_{sire}_{dam}.vcf.gz'
+        get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
@@ -297,7 +313,7 @@ rule GLnexus_merge_families:
 
 rule rtg_pedigree:
     output:
-        'mendel/{offspring}_{sire}_{dam}.ped'
+        get_dir('mendel','{offspring}_{sire}_{dam}.ped'
     shell:
         '''
         FILE={output}
@@ -319,7 +335,7 @@ rule rtg_format:
     input:
         ref = lambda wildcards: multiext(config['reference'],'','.fai')
     output:
-        sdf = 'ARS.sdf'
+        sdf = get_dir('main','ARS.sdf')
     params:
         singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/,.:/data',tmp_bind=False,output_bind=False,work_bind=False),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
@@ -332,17 +348,15 @@ rule rtg_format:
 
 rule rtg_mendelian_concordance:
     input:
-        sdf = 'ARS.sdf',
-        vcf = 'mendel/{offspring}_{sire}_{dam}.vcf.gz',
-        pedigree = 'mendel/{offspring}_{sire}_{dam}.ped'
+        sdf = get_dir('main','ARS.sdf'),
+        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz'),
+        pedigree = get_dir('mendel','{offspring}_{sire}_{dam}.ped')
     output:
-        temp = temp('mendel/filled_{offspring}_{sire}_{dam}.vcf.gz'),
-        vcf = 'mendel/{offspring}_{sire}_{dam}.inconsistent.vcf.gz',
-        stats = 'mendel/{offspring}_{sire}_{dam}.inconsistent.stats',
-        log = 'mendel/{offspring}_{sire}_{dam}.mendel.log'
+        temp = temp(get_dir('mendel','filled_{offspring}_{sire}_{dam}.vcf.gz')),
+        results = multiext(get_dir('mendel','{offspring}_{sire}_{dam}'),'.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
     params:
         vcf_in = lambda wildcards, input: '/data' / PurePath(input.vcf) if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data/mendel/filled_' + PurePath(input.vcf).name,
-        vcf_annotated = lambda wildcards, output: '/data' / PurePath(output.vcf),
+        vcf_annotated = lambda wildcards, output: '/data' / PurePath(output.results[0]),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
     threads: 1
     resources:
@@ -353,8 +367,8 @@ rule rtg_mendelian_concordance:
         bcftools merge --no-index -o {output.temp} -Oz {input.vcf} {config[missing_template]}
         {params.singularity_call} \
         {config[RTG_container]} \
-        /bin/bash -c "rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.log}"
-        bcftools stats {output.vcf} | grep "^SN" > {output.stats}
+        /bin/bash -c "rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.results[2]}"
+        bcftools stats {output.results[1]} | grep "^SN" > {output.results[1]}
         '''
 
 rule mendel_summary:
@@ -362,7 +376,7 @@ rule mendel_summary:
         logs = read_trios('.mendel.log'),
         stats = read_trios('.inconsistent.stats')
     output:
-        'mendel.summary.df'
+        get_dir('main','mendel.summary.df')
     run:
         import pandas as pd
 
