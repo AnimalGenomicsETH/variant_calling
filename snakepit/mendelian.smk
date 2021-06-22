@@ -100,7 +100,7 @@ rule rtg_mendelian_concordance:
         {params.singularity_call} \
         {config[RTG_container]} \
         /bin/bash -c "rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.results[2]}"
-        bcftools stats {output.results[1]} | grep "^SN" > {output.results[1]}
+        bcftools stats {output.results[0]} | grep "^SN" > {output.results[1]}
         '''
 
 rule mendel_summary:
