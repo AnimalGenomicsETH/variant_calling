@@ -60,9 +60,10 @@ for dir_ in ('input','output','work'):
 def capture_logic():
     if 'trios' in config:
         return [get_dir('main','mendel.summary.df')]
-    else:
+    elif 'autosomes' in config:
         return [get_dir('main','cohort.autosomes.vcf.gz')]
-
+    else:
+        return [get_dir('main','cohort.all.vcf.gz')]
 rule all:
     input:
         capture_logic()
@@ -186,7 +187,7 @@ rule GLnexus_merge_chrm:
         vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
         tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        temp(multiext(get_dir('main','cohort.{chr}.vcf.gz'),'','.tbi'))
+        temp(multiext(get_dir('main','cohort.{chr,\d}.vcf.gz'),'','.tbi'))
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
@@ -235,14 +236,14 @@ rule GLnexus_merge:
     input:
         expand(get_dir('output','{animal}.bwa.g.vcf.gz'),animal=config['animals'])
     output:
-        get_dir('main','cohort.vcf.gz')
+        get_dir('main','cohort.all.vcf.gz')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1500
-    threads: 24 #force using 4 threads for bgziping
+    threads: 32 #force using threads for bgziping
     resources:
         mem_mb = 7000,
         disk_scratch = 500,
@@ -259,6 +260,6 @@ rule GLnexus_merge:
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
-        | bcftools view - | bgzip -@ 4 -c > {params.out}"
+        | bcftools view - | bgzip -@ {threads} -c > {params.out}"
         '''
         
