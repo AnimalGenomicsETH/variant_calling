@@ -1,0 +1,66 @@
+## variant calling
+shards: 32
+reference: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
+haplotype: 'asm'
+
+bam_path: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/roe_deer/09_2021-06-07_Illumina/aligned_against_BTA'
+
+model: 'bwa'
+DV_container: '/cluster/work/pausch/alex/images/deepvariant_1.1.0.sif'
+GL_container: '/cluster/work/pausch/alex/images/glnexus_v1.3.1.sif'
+
+animals:
+  - "20210528.A-RD21_01_weiss"
+  - "20210528.A-RD21_02_gelb"
+  - "20210528.A-RD21_03_grun"
+  - "20210528.A-RD21_04_grun"
+  - "20210528.A-RD21_06_orange"
+  - "20210528.A-RD21_09_rot"
+  - "20210528.A-RD21_10_orange"
+  - "20210528.A-RD21_12_blau"
+  - "20210528.A-RD21_13_weiss"
+  - "20210528.A-RD21_142"
+  - "20210528.A-RD21_225"
+  - "20210528.A-RD21_78"
+  - "20210528.A-RD21_Y2"
+  - "20210528.A-RD21_Y3"
+  - "20210528.A-RD21_Y4"
+  #- "45p"
+
+## validation stats
+vcf:
+  DV: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/dedup_alignment/cohort.autosomes.vcf.gz'
+  GATK: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/filter_impute/filtered_autosomes_gatk4.vcf.gz'
+truth: '/cluster/work/pausch/alex/HD_chip.filtered.vcf.gz'
+
+chips:
+  hd:
+    vcf: '/cluster/work/pausch/alex/chip_hd.filtered.vcf.gz'
+    BSWCHEF120071057962: "BSWCHEF120071057962"
+    RM1894: "BSWCHEM110514060086"
+    RM1896: "BSWUSAM000000168052"
+    RM1899: "BSWUSAM000000186594"
+  150k:
+    vcf: '/cluster/work/pausch/alex/chip_150k.filtered.vcf.gz'
+    RM1904: "BSWCHEM120110758232"
+  50kv1:
+    vcf: '/cluster/work/pausch/alex/chip_50kv1.filtered.vcf.gz'
+    RM1898: "BSWITAMTA0000155941"
+    RM1902: "BSWCHEM120059531446"
+    RM1903: "BSWCHEM120062350447"
+    #RM1908: "BSWCHEM110064090335"
+  50kv2:
+    vcf: '/cluster/work/pausch/alex/chip_50kv2.filtered.vcf.gz'
+    RM1900: "BSWCHEM120053210071"
+    RM1901: "BSWCHEM120116520307"
+    RM1905: "BSWCHEM120098390639"
+    RM1906: "BSWCHEM120102938123"
+    RM2009: "BSWCHEM120100763062"
+  47k:
+    vcf: '/cluster/work/pausch/alex/chip_47k.filtered.vcf.gz'
+    BSWCHEF120121047356: "BSWCHEF120121047356"
+    BSWCHEF120130256848: "BSWCHEF120130256848"
+  30k:
+    vcf: '/cluster/work/pausch/alex/chip_30k.filtered.vcf.gz'
+    BSWCHEF120127240430: "BSWCHEF120127240430"
+    BSWCHEF120127770289: "BSWCHEF120127770289"

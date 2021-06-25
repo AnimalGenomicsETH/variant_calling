@@ -85,7 +85,7 @@ rule deepvariant_make_examples:
         regions = ' '.join(map(str,range(1,30)))
     threads: 1
     resources:
-        mem_mb = 10000,
+        mem_mb = 6000,
         walltime = '14:00',
         disk_scratch = 1,
         use_singularity = True
@@ -117,12 +117,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 32
+    threads: 16
     resources:
-        mem_mb = 4000,
+        mem_mb = 6000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '8:00'
+        walltime = lambda wildcards: '24:00'
     shell:
         '''
         {params.singularity_call} \
@@ -149,8 +149,8 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 80000,
-        walltime = '14:00',
+        mem_mb = 50000,
+        walltime = '4:00',
         disk_scratch = 1,
         use_singularity = True
     shell:

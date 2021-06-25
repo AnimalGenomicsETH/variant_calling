@@ -1,0 +1,9 @@
+resources:
+  vcf_genot: '/cluster/work/pausch/temp_scratch/BSW_remap/var_call/trios/joint_genotyping/'
+  assembly: '/cluster/work/pausch/assemblies/ARS_UCD1.2/ARS_UCD.fasta'
+tools:
+  GATK4: '/cluster/work/pausch/audald/software/gatk-4.2.0.0/gatk'
+  JAVA: "module load gcc/4.8.2 java/1.8.0_73 \n "
+  BEAGLE: '/cluster/work/pausch/audald/software/beagle.27Jan18.7e1.jar'
+fold_out:
+  vcf_beagle: "/cluster/work/pausch/temp_scratch/BSW_remap/var_call/trios/filter_impute"
