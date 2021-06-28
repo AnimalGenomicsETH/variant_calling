@@ -87,7 +87,7 @@ rule rtg_mendelian_concordance:
         temp = temp(get_dir('mendel','filled_{offspring}_{sire}_{dam}.vcf.gz')),
         results = multiext(get_dir('mendel','{offspring}_{sire}_{dam}'),'.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
     params:
-        vcf_in = lambda wildcards, input: '/data' / PurePath(input.vcf) if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data/mendel/filled_' + PurePath(input.vcf).name,
+        vcf_in = lambda wildcards, input, output: '/data' / PurePath(input.vcf) if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data' / PurePath(output.temp),
         vcf_annotated = lambda wildcards, output: '/data' / PurePath(output.results[0]),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
     threads: 1
@@ -96,12 +96,15 @@ rule rtg_mendelian_concordance:
         walltime = '30'
     shell:
         '''
+        #bcftools view -s BSWCHEM120096296001 -Ou RM808_BSWCHEM120096296001_missing.vcf.gz | bcftools reheader --samples <(echo missing) | bcftools merge --no-index -o filled_RM808_BSWCHEM120096296001_missing.vcf.gz -Oz RM808_BSWCHEM120096296001_missing.vcf.gz -
         bcftools merge --no-index -o {output.temp} -Oz {input.vcf} {config[missing_template]}
         {params.singularity_call} \
         {config[RTG_container]} \
         /bin/bash -c "rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.results[2]}"
         bcftools stats {output.results[0]} | grep "^SN" > {output.results[1]}
         '''
+
+#rtg vcfeval -t /data/ARS.sdf -b /data/GATK_mendel/RM721_missing_RM720.vcf.gz -c /data/GATK_mendel/RM721_missing_RM720.vcf.gz --sample RM720,RM721 -o /tmp/R72x2 -T 2 --no-roc --squash-ploidy --output-mode=roc-only
 
 rule mendel_summary:
     input:
