@@ -104,6 +104,25 @@ rule rtg_mendelian_concordance:
         bcftools stats {output.results[0]} | grep "^SN" > {output.results[1]}
         '''
 
+rule rtg_vcfeval:
+    input:
+        sdf = get_dir('main','ARS.sdf'),
+        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz')
+    output:
+        logs = get_dir('mendel','{offspring}_{sire}_{dam}.vcfeval.log')
+    params:
+        samples = lambda wildcards: f'{wildcards.sire if wildcards.sire != "missing" else wildcards.dam},{wildcards.offspring}',
+        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
+    threads: 4
+    resources:
+        mem_mb = 5000,
+        disk_scratch = 10000
+    shell:
+        '''
+        {params.singularity_call} \
+        {config[RTG_container]} \
+        /bin/bash -c "cd $TMPDIR; rtg vcfeval -t /data/{input.sdf} -b /data/{input.vcf} -c /data/{input.vcf} --sample {params.samples} -o null_output -T {threads} --no-roc --squash-ploidy --output-mode=roc-only > /data/{output}"
+        '''
 #rtg vcfeval -t /data/ARS.sdf -b /data/GATK_mendel/RM721_missing_RM720.vcf.gz -c /data/GATK_mendel/RM721_missing_RM720.vcf.gz --sample RM720,RM721 -o /tmp/R72x2 -T 2 --no-roc --squash-ploidy --output-mode=roc-only
 
 rule mendel_summary:
