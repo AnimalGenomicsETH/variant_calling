@@ -116,42 +116,58 @@ rule rtg_vcfeval:
     threads: 4
     resources:
         mem_mb = 5000,
-        disk_scratch = 10000
+        disk_scratch = 20
     shell:
         '''
         {params.singularity_call} \
         {config[RTG_container]} \
         /bin/bash -c "cd $TMPDIR; rtg vcfeval -t /data/{input.sdf} -b /data/{input.vcf} -c /data/{input.vcf} --sample {params.samples} -o null_output -T {threads} --no-roc --squash-ploidy --output-mode=roc-only > /data/{output}"
         '''
-#rtg vcfeval -t /data/ARS.sdf -b /data/GATK_mendel/RM721_missing_RM720.vcf.gz -c /data/GATK_mendel/RM721_missing_RM720.vcf.gz --sample RM720,RM721 -o /tmp/R72x2 -T 2 --no-roc --squash-ploidy --output-mode=roc-only
+
+rule bcftools_mendelian:
+    input:
+        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz')
+    output:
+        logs = get_dir('mendel','{offspring}_{sire}_{dam}.mendelian.log')
+    params:
+        sample = '{dam},{sire},{offspring}'
+    threads: 1
+    resources:
+        mem_mb = 3000,
+        walltime = '30'
+    shell:
+        '''
+        bcftools +mendelian {input.vcf} -t {params.sample} -m c -m x > >(bcftools stats - | grep "SN" >> {output}) 2> >(grep -v "#" >> {output})
+        '''
 
 rule mendel_summary:
     input:
-        logs = read_trios('.mendel.log'),
-        stats = read_trios('.inconsistent.stats')
+        logs = read_trios('.mendelian.log'),
+        #stats = read_trios('.inconsistent.stats')
     output:
-        get_dir('main','mendel.summary.df')
+        get_dir('main','mendel.{caller}.summary.df')
     run:
         import pandas as pd
 
         rows = []
-        for log_in, stat_in in zip(input.logs,input.stats):
+        #for log_in, stat_in in zip(input.logs,input.stats):
+        for log_in in input.logs:
             rows.append({k:v for k,v in zip(('offspring','sire','dam'),PurePath(log_in).with_suffix('').with_suffix('').name.split('_'))})
             with open(log_in,'r') as fin:
-                for line in fin:
-                    if 'violation of Mendelian constraints' in line:
-                        violate, total = (int(i) for i in line.split()[0].split('/'))
-                        rows[-1]['violate'] = violate
-                        rows[-1]['total'] = total
-            with open(stat_in,'r') as fin:
-                for line in fin:
-                    if 'number of SNPs' in line:
-                        rows[-1]['SNP'] = int(line.rstrip().split()[-1])
-                    elif 'number of indels' in line:
-                        rows[-1]['indel'] = int(line.rstrip().split()[-1])
-        
+                for i,line in enumerate(fin):
+                    parts = line.rstrip().split()
+                    if parts[0].isdigit():
+                        rows[-1]['consistent'] = int(parts[0])
+                        rows[-1]['inconsistent'] = int(parts[1])
+                        rows[-1]['uninformative'] = int(parts[2])
+                    elif line[0] != '#' and 'number of SNPs:' in line:
+                        rows[-1]['SNP'] = int(parts[-1])
+                    elif line[0] != '#' and 'number of indels:' in line:
+                        rows[-1]['indel'] = int(parts[-1])
+
         df = pd.DataFrame(rows)
-        df['rate']=df['violate']/df['total']
-        df['duo']=(df == 'missing').any(axis=1)
+        df['rate'] = df['inconsistent']/(df['consistent']+df['inconsistent'])
+        df['duo'] = (df == 'missing').any(axis=1)
+        df['caller'] = wildcards.caller
         df.to_csv(output[0],index=False)
 

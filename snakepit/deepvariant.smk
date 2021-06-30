@@ -13,7 +13,7 @@ def get_dir(base='work',ext='', **kwargs):
     elif base == 'work':
         base_dir = get_dir('output','intermediate_results_{animal}',**kwargs)
     elif base == 'mendel':
-        base_dir = 'GATK_mendel'
+        base_dir = '{caller}_mendel'
     elif base == 'main':
         base_dir = ''
     else:
@@ -59,7 +59,7 @@ for dir_ in ('input','output','work'):
 
 def capture_logic():
     if 'trios' in config:
-        return [get_dir('main','mendel.summary.df')]
+        return [get_dir('main','mendel.{caller}.summary.df',caller=caller) for caller in ('DV','GATK')]
     elif 'autosomes' in config:
         return [get_dir('main','cohort.autosomes.vcf.gz')]
     else:
