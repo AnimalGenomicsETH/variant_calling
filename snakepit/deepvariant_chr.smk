@@ -130,7 +130,7 @@ rule deepvariant_call_variants:
         {params.contain} \
         /bin/bash -c "cd /tmp; /opt/deepvariant/bin/call_variants \
         --outfile /{output} \
-        --examples {params.examples} \
+        --examples /{params.examples} \
         --checkpoint {params.model} \
         {params.vino}"
         '''
