@@ -120,7 +120,7 @@ rule deepvariant_call_variants:
         vino = lambda wildcards: '--use_openvino'
     threads: 32
     resources:
-        mem_mb = 4000,
+        mem_mb = 1500,
         disk_scratch = 10,
         use_singularity = True,
         walltime = lambda wildcards: '4:00'
