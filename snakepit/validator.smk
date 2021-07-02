@@ -75,7 +75,7 @@ rule format_record_tsv:
     output:
         'intersection_{norm}_{collapse}/{callset}.{cols}.{var}.tsv'
     params:
-        target_cols = lambda wildcards: '$1"\t"$2"\t"$5' if wildcards.cols == 'bases' else '$1"\t"$2',
+        target_cols = lambda wildcards: '$1"\t"$2"\t"$4"\t"$5' if wildcards.cols == 'bases' else '$1"\t"$2',
         v_type = lambda wildcards: '-m2 -M2 -v snps' if wildcards.var == 'snp' else '-m2 -M2 -v indels'
     shell:
         '''
@@ -274,3 +274,21 @@ rule plot_concordance:
         plt.savefig(output[0])
         #df2['conc']=df2['truth']==df2['call']
         #df2.groupby(['caller','conc']).sum()
+
+rule stats:
+    input:
+        ''
+    output:
+        ''
+    run:
+        #no missing
+        df['conc'] = df['truth'] == df['call']
+        x=nom.groupby(['caller','sample','chip','conc'])['count'].sum().reset_index()
+
+        def get_ratio(df):
+            counts = list(df['count'])
+            ratio = [counts[i+1]/(counts[i]+counts[i+1]) for i in range(0,len(counts),2)]
+            new_df = df[::2][['caller','sample','chip']]
+            new_df['GC']=ratio
+            return new_df
+            ndf = get_ratio(x)

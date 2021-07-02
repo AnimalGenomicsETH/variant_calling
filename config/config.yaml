@@ -35,7 +35,7 @@ vcf:
   GATK: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/alex/mendel_calling/50_sample/cohort.autosomes.GATK.vcf.gz'
   #DV: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/dedup_alignment/cohort.autosomes.vcf.gz'
   #GATK: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/audald/low_pass_imputation/golden_set/filter_impute/filtered_autosomes_gatk4.vcf.gz'
-truth: '/cluster/work/pausch/alex/chip_vcfs/chip_hd.vcf.gz'
+truth: '/cluster/work/pausch/alex/chip_vcfs/chip_hd.filtered.vcf.gz'
 
 ## concordance stats
 chips:
