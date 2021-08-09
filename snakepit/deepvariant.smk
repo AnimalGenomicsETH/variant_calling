@@ -9,7 +9,7 @@ def get_dir(base='work',ext='', **kwargs):
     if base == 'input':
         base_dir = config.get('bam_path','')
     elif base == 'output':
-        base_dir = 'output'
+        base_dir = 'output_DV2'
     elif base == 'work':
         base_dir = get_dir('output','intermediate_results_{animal}',**kwargs)
     elif base == 'mendel':
@@ -52,7 +52,7 @@ def make_singularity_call(wildcards,extra_args='',tmp_bind='$TMPDIR',input_bind=
         call += f'-B {tmp_bind}:/tmp '
     return call
 
-for dir_ in ('input','output','work'):
+for dir_ in ('output','work'):
     for animal,reference in product(config['animals'],config['reference']):
         Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
@@ -86,7 +86,7 @@ rule deepvariant_make_examples:
     threads: 1
     resources:
         mem_mb = 6000,
-        walltime = '14:00',
+        walltime = '4:00',
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -99,6 +99,7 @@ rule deepvariant_make_examples:
         --reads {input.bam[0]} \
         --examples {params.examples} \
         --gvcf {params.gvcf} \
+        --include_med_dp \
         {params.model_args} \
         {params.phase_args} \
         --task {wildcards.N}
@@ -117,12 +118,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 24
+    threads: 32
     resources:
-        mem_mb = 6000,
+        mem_mb = 2000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '120:00'
+        walltime = lambda wildcards: '4:00'
     shell:
         '''
         {params.singularity_call} \
@@ -187,7 +188,7 @@ rule GLnexus_merge_chrm:
         vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
         tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        temp(multiext(get_dir('main','cohort.{chr,\d}.vcf.gz'),'','.tbi'))
+        temp(multiext(get_dir('main','cohort.{chr,\d+}.vcf.gz'),'','.tbi'))
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
