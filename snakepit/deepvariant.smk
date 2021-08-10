@@ -112,7 +112,7 @@ rule deepvariant_call_variants:
     output:
         temp(get_dir('work','call_variants_output.tfrecord.gz'))
     params:
-        examples = lambda wildcards: (f'make_examples.tfrecord@{config["shards"]}.gz'),
+        examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model = lambda wildcards: get_model({'model':'bwa'}),
         dir_ = lambda wildcards: get_dir('work',**wildcards),
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
@@ -120,17 +120,18 @@ rule deepvariant_call_variants:
         vino = lambda wildcards: '--use_openvino'
     threads: 32
     resources:
-        mem_mb = 2000,
+        mem_mb = 1000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '4:00'
+        walltime = lambda wildcards: '4:00',
+        use_AVX512 = True
     shell:
         '''
         {params.singularity_call} \
         {params.contain} \
-        /bin/bash -c "cd {params.dir_}; /opt/deepvariant/bin/call_variants \
+        /bin/bash -c "cd /tmp; /opt/deepvariant/bin/call_variants \
         --outfile /{output} \
-        --examples {params.examples} \
+        --examples /{params.examples} \
         --checkpoint {params.model} \
         {params.vino}"
         '''
@@ -150,7 +151,7 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 50000,
+        mem_mb = 30000,
         walltime = '4:00',
         disk_scratch = 1,
         use_singularity = True
