@@ -20,6 +20,8 @@ def get_dir(base='work',ext='', **kwargs):
         raise Exception('Base not found')
     return str(Path(base_dir.format_map(Default(kwargs))) / ext.format_map(Default(kwargs)))
 
+if config.get("per_chrom",False):
+    ruleorder: split_gvcf_chromosomes > deepvariant_postprocess 
 
 include: 'mendelian.smk'
 
@@ -60,7 +62,7 @@ for dir_ in ('output','work'):
 def capture_logic():
     if 'trios' in config:
         return [get_dir('main','mendel.{caller}.summary.df',caller=caller) for caller in ('DV','GATK')]
-    elif 'autosomes' in config:
+    elif config.get('regions') == 'autosomes':
         return [get_dir('main','cohort.autosomes.vcf.gz')]
     else:
         return [get_dir('main','cohort.all.vcf.gz')]
@@ -68,21 +70,29 @@ rule all:
     input:
         capture_logic()
 
+def get_regions(wildcards):
+    if 'regions' not in config:
+        return ''
+    elif config.get('regions',False) == 'autosomes':
+        return f'--regions "{" ".join(map(str,range(1,30)))}"'
+    else:
+        return f'--regions {wildcards.chromosome}'
+
 rule deepvariant_make_examples:
     input:
         ref = multiext(config['reference'],'','.fai'),
         bam = multiext(get_dir('input','{animal}.bam'),'','.bai')
     output:
-        example = temp(get_dir('work','make_examples.tfrecord-{N}-of-{sharding}.gz')),
-        gvcf = temp(get_dir('work','gvcf.tfrecord-{N}-of-{sharding}.gz'))
+        example = temp(get_dir('work','make_examples.{chromosome}.tfrecord-{N}-of-{sharding}.gz')),
+        gvcf = temp(get_dir('work','gvcf.{chromosome}.tfrecord-{N}-of-{sharding}.gz'))
     params:
-        examples = lambda wildcards, output: PurePath(output[0]).with_name(f'make_examples.tfrecord@{config["shards"]}.gz'),
-        gvcf = lambda wildcards, output: PurePath(output[1]).with_name(f'gvcf.tfrecord@{config["shards"]}.gz'),
+        examples = lambda wildcards, output: PurePath(output['example']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
+        gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         phase_args = lambda wildcards: '--parse_sam_aux_fields={i} --sort_by_haplotypes={i}'.format(i=('true' if False else 'false')),
         model_args = lambda wildcards: '--add_hp_channel --alt_aligned_pileup diff_channels --realign_reads=false --vsc_min_fraction_indels 0.12' if 'bwa' == 'pbmm2' else '',
         singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
-        regions = ' '.join(map(str,range(1,30)))
+        regions = lambda wildcards: get_regions(wildcards) #f'--regions "{" ".join(map(str,range(1,30)))}"' if config.get('autosomes',False) else ''
     threads: 1
     resources:
         mem_mb = 6000,
@@ -100,17 +110,17 @@ rule deepvariant_make_examples:
         --examples {params.examples} \
         --gvcf {params.gvcf} \
         --include_med_dp \
+        {params.regions} \
         {params.model_args} \
         {params.phase_args} \
         --task {wildcards.N}
-        #--regions {params.regions}
         '''
 
 rule deepvariant_call_variants:
     input:
-        (get_dir('work', f'make_examples.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
+        (get_dir('work', f'make_examples.{{chromosome}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
     output:
-        temp(get_dir('work','call_variants_output.tfrecord.gz'))
+        temp(get_dir('work','call_variants_output.{chromosome}.tfrecord.gz'))
     params:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model = lambda wildcards: get_model({'model':'bwa'}),
@@ -139,11 +149,11 @@ rule deepvariant_call_variants:
 rule deepvariant_postprocess:
     input:
         ref = multiext(config['reference'],'','.fai'),
-        variants = get_dir('work','call_variants_output.tfrecord.gz'),
-        gvcf = (get_dir('work', f'gvcf.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
+        variants = get_dir('work','call_variants_output.{chromosome}.tfrecord.gz'),
+        gvcf = (get_dir('work', f'gvcf.{{chromosome}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
     output:
-        vcf = get_dir('output','{animal}.bwa.vcf.gz'),
-        gvcf = get_dir('output','{animal}.bwa.g.vcf.gz')
+        vcf = get_dir('output','{animal}.bwa.{chromosome}.vcf.gz'),
+        gvcf = get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz')
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/'),
@@ -170,7 +180,7 @@ rule deepvariant_postprocess:
 
 rule split_gvcf_chromosomes:
     input:
-        get_dir('output','{animal}.bwa.g.vcf.gz')
+        get_dir('output','{animal}.{chromosome}.bwa.g.vcf.gz')
     output:
         gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in range(1,30))),
         tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in range(1,30)))
@@ -189,7 +199,7 @@ rule GLnexus_merge_chrm:
         vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
         tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        temp(multiext(get_dir('main','cohort.{chr,\d+}.vcf.gz'),'','.tbi'))
+        multiext(get_dir('main','cohort.{chr,\d+}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
@@ -218,33 +228,33 @@ rule GLnexus_merge_chrm:
         tabix -p vcf {output[0]}
         '''
 
-rule aggregate_merge_chrm:
+rule aggregate_autosomes:
     input:
         vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=range(1,30)),
         tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=range(1,30)),
     output:
-        vcf = get_dir('main','cohort.autosomes.vcf.gz')
+        multiext(get_dir('main','cohort.autosomes.vcf.gz'),'','.tbi')
     threads: 8
     resources:
         mem_mb = 2000,
-        walltime = '30'
+        walltime = '60'
     shell:
         '''
         bcftools concat --threads {threads} -o {output.vcf} -Oz {input.vcf}
-        tabix -p vcf {output.vcf}
+        tabix -p vcf {output[0]}
         '''
 
 rule GLnexus_merge:
     input:
         expand(get_dir('output','{animal}.bwa.g.vcf.gz'),animal=config['animals'])
     output:
-        get_dir('main','cohort.all.vcf.gz')
+        multiext(get_dir('main','cohort.all.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1500
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: 32 #force using threads for bgziping
     resources:
         mem_mb = 7000,
@@ -262,6 +272,7 @@ rule GLnexus_merge:
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
-        | bcftools view - | bgzip -@ {threads} -c > {params.out}"
+        | bcftools view - | bgzip -@ 4 -c > {params.out}"
+        tabix -p vcf {output[0]}
         '''
         
