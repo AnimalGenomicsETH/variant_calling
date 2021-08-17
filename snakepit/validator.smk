@@ -210,6 +210,9 @@ rule get_snps:
     shell:
         'bcftools view -m2 -M2 -v snps -o {output} {input}'
 
+#rule gtcomapre:
+#vcfgtcompare.sh other cohort.29.imputed.vcf.gz ../imputed/29_beagle.vcf.gz | vcf2tsv >this_other_comparison.tsv
+
 rule picard_concordance:
     input:
         query = lambda wildcards: f'{wildcards.caller}.normed.snp.vcf',
