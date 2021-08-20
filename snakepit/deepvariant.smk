@@ -20,8 +20,11 @@ def get_dir(base='work',ext='', **kwargs):
         raise Exception('Base not found')
     return str(Path(base_dir.format_map(Default(kwargs))) / ext.format_map(Default(kwargs)))
 
-if config.get("per_chrom",False):
+if config.get("per_sample",True):
     ruleorder: split_gvcf_chromosomes > deepvariant_postprocess 
+else:
+    ruleorder: deepvariant_postprocess > split_gvcf_chromosomes
+
 
 include: 'mendelian.smk'
 
@@ -130,7 +133,7 @@ rule deepvariant_call_variants:
         vino = lambda wildcards: '--use_openvino'
     threads: 32
     resources:
-        mem_mb = 1000,
+        mem_mb = 1500,
         disk_scratch = 1,
         use_singularity = True,
         walltime = lambda wildcards: '4:00',
@@ -161,7 +164,7 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 30000,
+        mem_mb = 50000,
         walltime = '4:00',
         disk_scratch = 1,
         use_singularity = True
@@ -180,7 +183,7 @@ rule deepvariant_postprocess:
 
 rule split_gvcf_chromosomes:
     input:
-        get_dir('output','{animal}.{chromosome}.bwa.g.vcf.gz')
+        get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz',chromosome = config.get('regions','all'))
     output:
         gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in range(1,30))),
         tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in range(1,30)))
