@@ -131,12 +131,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 32
+    threads: 18
     resources:
-        mem_mb = 1500,
+        mem_mb = 2250,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '4:00',
+        walltime = lambda wildcards: '24:00',
         use_AVX512 = True
     shell:
         '''
@@ -165,7 +165,7 @@ rule deepvariant_postprocess:
     threads: 1
     resources:
         mem_mb = 50000,
-        walltime = '4:00',
+        walltime = '24:00',
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -243,7 +243,7 @@ rule aggregate_autosomes:
         walltime = '60'
     shell:
         '''
-        bcftools concat --threads {threads} -o {output.vcf} -Oz {input.vcf}
+        bcftools concat --threads {threads} -o {output} -Oz {input.vcf}
         tabix -p vcf {output[0]}
         '''
 
