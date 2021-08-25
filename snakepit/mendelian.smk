@@ -1,4 +1,4 @@
-def read_trios(ext='.vcf.gz'):
+def read_trios(ext='.{chr}.vcf.gz'):
     if 'trios' not in config:
         return []
     import pandas as pd
@@ -12,11 +12,11 @@ def read_trios(ext='.vcf.gz'):
 
 rule GLnexus_merge_families:
     input:
-        offspring = 'output/{offspring}.bwa.g.vcf.gz',
-        sire  = lambda wildcards: 'output/{sire}.bwa.g.vcf.gz' if wildcards.sire != 'missing' else [],
-        dam = lambda wildcards: 'output/{dam}.bwa.g.vcf.gz' if wildcards.dam != 'missing' else []
+        offspring = get_dir('output','{offspring}.bwa.{chr}.g.vcf.gz'),
+        sire  = lambda wildcards: get_dir('output','{sire}.bwa.{chr}.g.vcf.gz') if wildcards.sire != 'missing' else [],
+        dam = lambda wildcards: get_dir('output','{dam}.bwa.{chr}.g.vcf.gz') if wildcards.dam != 'missing' else []
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz')
+        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
@@ -81,11 +81,11 @@ rule rtg_format:
 rule rtg_mendelian_concordance:
     input:
         sdf = get_dir('main','ARS.sdf'),
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz'),
+        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz'),
         pedigree = get_dir('mendel','{offspring}_{sire}_{dam}.ped')
     output:
-        temp = temp(get_dir('mendel','filled_{offspring}_{sire}_{dam}.vcf.gz')),
-        results = multiext(get_dir('mendel','{offspring}_{sire}_{dam}'),'.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
+        temp = temp(get_dir('mendel','filled_{offspring}_{sire}_{dam}.{chr}.vcf.gz')),
+        results = multiext(get_dir('mendel','{offspring}_{sire}_{dam}.{chr}'),'.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
     params:
         vcf_in = lambda wildcards, input, output: '/data' / PurePath(input.vcf) if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data' / PurePath(output.temp),
         vcf_annotated = lambda wildcards, output: '/data' / PurePath(output.results[0]),
@@ -107,9 +107,9 @@ rule rtg_mendelian_concordance:
 rule rtg_vcfeval:
     input:
         sdf = get_dir('main','ARS.sdf'),
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz')
+        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
     output:
-        logs = get_dir('mendel','{offspring}_{sire}_{dam}.vcfeval.log')
+        logs = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcfeval.log')
     params:
         samples = lambda wildcards: f'{wildcards.sire if wildcards.sire != "missing" else wildcards.dam},{wildcards.offspring}',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
@@ -126,9 +126,9 @@ rule rtg_vcfeval:
 
 rule bcftools_mendelian:
     input:
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.vcf.gz')
+        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
     output:
-        logs = get_dir('mendel','{offspring}_{sire}_{dam}.mendelian.log')
+        logs = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.mendelian.log')
     params:
         sample = '{dam},{sire},{offspring}'
     threads: 1
@@ -142,10 +142,10 @@ rule bcftools_mendelian:
 
 rule mendel_summary:
     input:
-        logs = read_trios('.mendelian.log'),
+        logs = read_trios('.{chr}.mendelian.log'),
         #stats = read_trios('.inconsistent.stats')
     output:
-        get_dir('main','mendel.{caller}.summary.df')
+        get_dir('main','mendel.{caller}.{chr}.summary.df')
     run:
         import pandas as pd
 
