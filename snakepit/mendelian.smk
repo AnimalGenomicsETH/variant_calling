@@ -152,7 +152,7 @@ rule mendel_summary:
         rows = []
         #for log_in, stat_in in zip(input.logs,input.stats):
         for log_in in input.logs:
-            rows.append({k:v for k,v in zip(('offspring','sire','dam'),PurePath(log_in).with_suffix('').with_suffix('').name.split('_'))})
+            rows.append({k:v for k,v in zip(('offspring','sire','dam'),PurePath(log_in).with_suffix('').with_suffix('').with_suffix('').name.split('_'))})
             with open(log_in,'r') as fin:
                 for i,line in enumerate(fin):
                     parts = line.rstrip().split()
