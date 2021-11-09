@@ -29,10 +29,12 @@ else:
 include: 'mendelian.smk'
 
 wildcard_constraints:
-     haplotype = r'asm|hap1|hap2|parent1|parent2',
-     phase = r'unphased|phased',
-     model = r'pbmm2|hybrid|bwa|mm2'
-
+    haplotype = r'asm|hap1|hap2|parent1|parent2',
+    phase = r'unphased|phased',
+    model = r'pbmm2|hybrid|bwa|mm2',
+    caller = r'DV|GATK',
+    chr = r'\d*|all'
+    
 def get_model(wildcards,base='/opt/models',ext='model.ckpt'):
     model_location = f'{base}/{{}}/{ext}'
     if wildcards['model'] == 'pbmm2':
@@ -69,6 +71,7 @@ def capture_logic():
         return [get_dir('main','cohort.autosomes.vcf.gz')]
     else:
         return [get_dir('main','cohort.all.vcf.gz')]
+
 rule all:
     input:
         capture_logic()
@@ -131,12 +134,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 24
+    threads: 18
     resources:
-        mem_mb = 2000,
+        mem_mb = 2500,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '4:00',
+        walltime = lambda wildcards: '24:00',
         use_AVX512 = True
     shell:
         '''
