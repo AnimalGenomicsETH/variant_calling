@@ -7,7 +7,7 @@ wildcard_constraints:
     cols = r'pos_only|bases',
     var = r'snp|indel'
     
-localrules: format_record_tsv, summarise_matches, variant_density, generate_karyotype
+#localrules: format_record_tsv, summarise_matches, variant_density, generate_karyotype
 
 class Default(dict):
     def __missing__(self, key):
@@ -27,12 +27,15 @@ def get_dir(base='work',ext='', **kwargs):
 def capture_logic():
     targets = []
 
-    for vcfs in combinations(config['vcf'],2):
-        targets.append(get_dir('concordance',f'{".".join(vcfs)}.summary.txt'))
-     
-    for vcf in config['vcf']:
-        targets.append('intersection_normed_all.DV1.DV2.pos_only.snp.summary.stats')
+    for vcfs in combinations(config['vcfs'],2):
+        for callset in (*vcfs,'shared'):
+            targets.append(get_dir('intersection',f'{callset}.bases.snp.matches.count',norm='normed',collapse='all',caller1=vcfs[0],caller2=vcfs[1]))
     
+    #for vcf in config['vcf']:
+    #    targets.append('intersection_normed_all.DV1.DV2.pos_only.snp.summary.stats')
+    
+    for T in ('vcfs','imputed'):
+        targets.append(get_dir('concordance',f'{T}.summary.txt'))
     return targets
     
     
@@ -49,10 +52,10 @@ rule all:
 
 rule bcftools_norm:
     input:
-        vcf = lambda wildcards: config['vcf'][wildcards.caller],
+        vcf = lambda wildcards: config[wildcards.imputed][wildcards.caller],
         ref = config['ref']
     output:
-        get_dir('main','{caller}.normed.vcf.gz')
+        get_dir('main','{caller}.{imputed}.normed.vcf.gz')
     threads: 4
     resources:
         mem_mb = 2000,
@@ -65,8 +68,8 @@ rule bcftools_norm:
 
 rule bcftools_isec:
     input:
-        caller1 = lambda wildcards: get_dir('main','{caller1}.normed.vcf.gz') if wildcards.norm == 'normed' else config['vcf'][wildcards.caller1],
-        caller2 = lambda wildcards: get_dir('main','{caller2}.normed.vcf.gz') if wildcards.norm == 'normed' else config['vcf'][wildcards.caller2]
+        caller1 = lambda wildcards: get_dir('main','{caller1}.normed.vcf.gz') if wildcards.norm == 'normed' else config['vcfs'][wildcards.caller1],
+        caller2 = lambda wildcards: get_dir('main','{caller2}.normed.vcf.gz') if wildcards.norm == 'normed' else config['vcfs'][wildcards.caller2]
     output:
         (get_dir('intersection','{callset}.vcf',callset=n) for n in ('{caller1}','{caller2}','shared'))
     params:
@@ -77,9 +80,9 @@ rule bcftools_isec:
         walltime = '45'
     shell:
         '''
-        bcftools isec --threads {threads} -c {wildcards.collapse} -p {params} {input.DV} {input.GATK}
-        mv {params}/0000.vcf {params}/DV.vcf
-        mv {params}/0001.vcf {params}/GATK.vcf
+        bcftools isec --threads {threads} -c {wildcards.collapse} -p {params} {input.caller1} {input.caller2}
+        mv {params}/0000.vcf {params}/{wildcards.caller1}.vcf
+        mv {params}/0001.vcf {params}/{wildcards.caller2}.vcf
         mv {params}/0002.vcf {params}/shared.vcf
         '''
 
@@ -101,6 +104,8 @@ rule format_record_tsv:
     params:
         target_cols = lambda wildcards: '$1"\t"$2"\t"$4"\t"$5' if wildcards.cols == 'bases' else '$1"\t"$2',
         v_type = lambda wildcards: '-m2 -M2 -v snps' if wildcards.var == 'snp' else '-m2 -M2 -v indels'
+    resources:
+        walltime = '30'
     shell:
         '''
         bcftools view {params.v_type} {input} | awk '$1!~/#/ {{print {params.target_cols}}}' > {output}
@@ -136,7 +141,7 @@ rule count_matches:
 
 rule truth_only_positions:
     input:
-        variants = (get_dir('intersection','{callset}.{cols}.snp.tsv',callset=C) for C in ('shared','DV1','GATK')),
+        variants = lambda wildcards: (get_dir('intersection','{callset}.{cols}.snp.tsv',callset=C) for C in ('shared',wildcards.caller1,wildcards.caller2)),
         truth = 'truth.{cols}.tsv' #lambda wildcards: config['truth'][wildcards.cols]
     output:
         missing = 'intersection_{norm}_{collapse}_{caller1}_{caller2}/missing.{cols}.snp.tsv',
@@ -239,10 +244,10 @@ rule get_snps:
 
 rule picard_concordance:
     input:
-        query = lambda wildcards: get_dir('main',f'{wildcards.caller}.normed.snp.vcf'),
+        query = get_dir('main','{caller}.{imputed}.normed.snp.vcf'),
         truth = lambda wildcards: config['chips'][wildcards.chip]['vcf']
     output:
-        multiext(get_dir('concordance','{sample}.{chip}.{caller}'),'.conc','.metrics')
+        multiext(get_dir('concordance','{sample}.{chip}.{caller}.{imputed}'),'.conc','.metrics')
     params:
         ID = lambda wildcards: config['chips'][wildcards.chip][wildcards.sample],
         gc_out = lambda wildcards,output: PurePath(output[0]).parent / f'{wildcards.sample}_{wildcards.caller}'
@@ -269,14 +274,15 @@ def ID_concordances():
 
 rule aggreate_concordance:
     input:
-        concordance = lambda wildcards: expand(get_dir('concordance','{ID}.{caller}.conc'),ID=ID_concordances(),caller=config['vcf']),
-        metrics = lambda wildcards: expand(get_dir('concordance','{ID}.{caller}.metrics'),ID=ID_concordances(),caller=config['vcf'])
+        #multiext(get_dir('concordance','{ID}.{caller}.{imputed}',ID=I,caller=C,imputed=wildcards.imputed) for (I,C) in product(ID_concordances(),config[wildcards.imputed]),'.conc','.metrics')
+        concordance = lambda wildcards: (get_dir('concordance','{ID}.{caller}.{imputed}.conc',ID=I,caller=C,imputed=wildcards.imputed) for (I,C) in product(ID_concordances(),config[wildcards.imputed])),
+        metrics = lambda wildcards: (get_dir('concordance','{ID}.{caller}.{imputed}.metrics',ID=I,caller=C,imputed=wildcards.imputed) for (I,C) in product(ID_concordances(),config[wildcards.imputed]))
     output:
-        multiext(get_dir('concordance','summary'),'.txt','.df')
+        multiext(get_dir('concordance','{imputed}.summary'),'.txt','.df')
     shell:
         '''
-        echo -e "sample\tcaller\tSensitivity\tSpecificity\tHET F1\tHOMV F1\tVAR F1\tGC\tnR-GC" > {output[1]}
-        sort -k 13,13nr -k 11,11nr {input.concordance} >> {output.summary}
-        echo -e "sample\tchip\tcaller\ttruth\tcall\tcount" > {output[1]}
-        cat {input.metrics} >> {output.df}
+        echo -e "sample\tcaller\tSensitivity\tSpecificity\tHET F1\tHOMV F1\tVAR F1\tGC\tnR-GC" > {output[0]}
+        sort -k 13,13nr -k 11,11nr {input.concordance} >> {output[0]}
+        echo -e "sample\tchip\tcaller\ttruth\tcall\tcount\timputed" > {output[1]}
+        cat {input.metrics} | awk '{{print $0"\\t{wildcards.imputed}"}}' >> {output[1]}
         '''
