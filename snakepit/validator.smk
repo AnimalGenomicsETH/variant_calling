@@ -5,8 +5,8 @@ wildcard_constraints:
     norm = r'normed|raw',
     collapse = r'none|all',
     cols = r'pos_only|bases',
-    var = r'snp|indel'
-    
+    var = r'snp|indel',
+
 #localrules: format_record_tsv, summarise_matches, variant_density, generate_karyotype
 
 class Default(dict):
@@ -30,7 +30,8 @@ def capture_logic():
     for vcfs in combinations(config['vcfs'],2):
         for callset in (*vcfs,'shared'):
             targets.append(get_dir('intersection',f'{callset}.bases.snp.matches.count',norm='normed',collapse='all',caller1=vcfs[0],caller2=vcfs[1]))
-    
+            targets.append(get_dir('intersection','missing.bases.snp.count',norm='normed',collapse='all',caller1=vcfs[0],caller2=vcfs[1]))
+          
     #for vcf in config['vcf']:
     #    targets.append('intersection_normed_all.DV1.DV2.pos_only.snp.summary.stats')
     
@@ -144,9 +145,9 @@ rule truth_only_positions:
         variants = lambda wildcards: (get_dir('intersection','{callset}.{cols}.snp.tsv',callset=C) for C in ('shared',wildcards.caller1,wildcards.caller2)),
         truth = 'truth.{cols}.tsv' #lambda wildcards: config['truth'][wildcards.cols]
     output:
-        missing = 'intersection_{norm}_{collapse}_{caller1}_{caller2}/missing.{cols}.snp.tsv',
-        query = temp('intersection_{norm}_{collapse}_{caller1}_{caller2}/missing_temp.{cols}.var'),
-        truth = temp('intersection_{norm}_{collapse}_{caller1}_{caller2}/truth_temp.{cols}.tsv')
+        missing = get_dir('intersection','missing.{cols}.snp.count'),
+        query = temp(get_dir('intersection','missing_temp.{cols}.var')),
+        truth = temp(get_dir('intersection','truth_temp.{cols}.tsv'))
     threads: 8
     resources:
         mem_mb = 3000,
@@ -286,3 +287,21 @@ rule aggreate_concordance:
         echo -e "sample\tchip\tcaller\ttruth\tcall\tcount\timputed" > {output[1]}
         cat {input.metrics} | awk '{{print $0"\\t{wildcards.imputed}"}}' >> {output[1]}
         '''
+
+rule snp_sites:
+    input:
+        '{caller}.vcfs.normed.snp.vcf'
+    output:
+        '{caller}.vcfs.normed.snp.bed'
+    shell:
+        '''
+        grep -v '^#' {input} | awk -v OFS='\t' '{if(length($4) > length($5)) print $1,$2,$2+length($4)-1; else print $1,$2-1,$2+length($5)-1}' > {output}
+        '''
+
+rule bedtools_intersect:
+    input:
+        (f'{caller}.vcfs.normed.snp.bed' for caller in ('DV2_GL4','GATK_L','truth'))
+    output:
+        'intersections.txt'
+    shell:
+        'bedtools multiinter -cluster -i {input} | cut -f 5 | sort | uniq -c > {output}'
