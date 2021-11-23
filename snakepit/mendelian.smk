@@ -10,6 +10,8 @@ def read_trios(ext='.{chr}.vcf.gz'):
         targets.append(get_dir('mendel',f'{"_".join(row)}{ext}'))
     return targets
 
+ruleorder: remove_tigs > GLnexus_merge_families
+
 rule GLnexus_merge_families:
     input:
         offspring = get_dir('output','{offspring}.bwa.{chr}.g.vcf.gz'),
@@ -42,6 +44,31 @@ rule GLnexus_merge_families:
         {params.gvcfs} \
         | bcftools view - | bgzip -@ 2 -c > {params.out}"
         '''
+
+rule remove_tigs:
+    input:
+        multiext(get_dir('mendel','{offspring}_{sire}_{dam}.all.vcf.gz'),'','.tbi')
+    output:
+        get_dir('mendel','{offspring}_{sire}_{dam}.autosomes.vcf.gz')
+    params:
+        regions = ','.join(map(str,range(1,30)))
+    threads: 2
+    resources:
+        mem_mb = 2000,
+        walltime = '20'
+    shell:
+        'bcftools view --threads {threads} -r {params.regions} -O z -o {output} {input[0]}'
+
+rule tabix:
+    input:
+        '{vcf}'
+    output:
+        '{vcf}.tbi'
+    resources:
+        mem_mb = 2000,
+        walltime = '20'
+    shell:
+        'tabix -p vcf {input}'
 
 rule rtg_pedigree:
     output:
@@ -140,10 +167,31 @@ rule bcftools_mendelian:
         bcftools +mendelian {input.vcf} -t {params.sample} -m c -m x > >(bcftools stats - | grep "SN" >> {output}) 2> >(grep -v "#" >> {output})
         '''
 
+rule bcftools_count:
+    input:
+        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+    output:
+        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.count')
+    shell:
+        '''
+        tabix -fp vcf {input}
+        bcftools index -n {input} > {output}
+        '''
+
+rule genotype_count:
+    input:
+        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+    output:
+        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.genotypes')
+    shell:
+        '''
+        bcftools annotate -x INFO,^FORMAT/GT {input} | grep -oP "([\.|\d]/[/.|\d])" | sort | uniq -c > {output}
+        '''
+
 rule mendel_summary:
     input:
         logs = read_trios('.{chr}.mendelian.log'),
-        #stats = read_trios('.inconsistent.stats')
+        stats = read_trios('.{chr}.count')
     output:
         get_dir('main','mendel.{caller}.{chr}.summary.df')
     run:
@@ -164,7 +212,8 @@ rule mendel_summary:
                         rows[-1]['SNP'] = int(parts[-1])
                     elif line[0] != '#' and 'number of indels:' in line:
                         rows[-1]['indel'] = int(parts[-1])
-
+            with open(PurePath(log_in).with_suffix('').with_suffix('.count'),'r') as fin:
+                rows[-1]['vcf_count'] = int(fin.readline())
         df = pd.DataFrame(rows)
         df['rate'] = df['inconsistent']/(df['consistent']+df['inconsistent'])
         df['duo'] = (df == 'missing').any(axis=1)
