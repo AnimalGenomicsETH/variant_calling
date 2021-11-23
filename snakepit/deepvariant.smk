@@ -33,7 +33,7 @@ wildcard_constraints:
     phase = r'unphased|phased',
     model = r'pbmm2|hybrid|bwa|mm2',
     caller = r'DV|GATK',
-    chr = r'\d*|all'
+    chr = r'\d*|all|autosomes'
     
 def get_model(wildcards,base='/opt/models',ext='model.ckpt'):
     model_location = f'{base}/{{}}/{ext}'
@@ -66,7 +66,7 @@ for dir_ in ('output','work'):
 
 def capture_logic():
     if 'trios' in config:
-        return [get_dir('main','mendel.{caller}.all.summary.df',caller=caller) for caller in ('DV','GATK')]
+        return [get_dir('main','mendel.{caller}.autosomes.summary.df',caller=caller) for caller in ('DV','GATK')]
     elif config.get('regions') == 'autosomes':
         return [get_dir('main','cohort.autosomes.vcf.gz')]
     else:

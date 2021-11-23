@@ -20,7 +20,6 @@ def get_dir(base='work',ext='', **kwargs):
         raise Exception('Base not found')
     return str(Path(base_dir.format_map(Default(kwargs))) / ext.format_map(Default(kwargs)))
 
-
 include: 'mendelian.smk'
 
 wildcard_constraints:
@@ -83,7 +82,7 @@ rule deepvariant_make_examples:
         model_args = lambda wildcards: '--add_hp_channel --alt_aligned_pileup diff_channels --realign_reads=false --vsc_min_fraction_indels 0.12' if 'bwa' == 'pbmm2' else '',
         singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
-        regions = lambda wildcards: wildcards.chromosome#' '.join(map(str,range(1,30)))
+        regions = lambda wildcards: wildcards.chromosome
     threads: 1
     resources:
         mem_mb = 8000,
@@ -100,6 +99,7 @@ rule deepvariant_make_examples:
         --reads {input.bam[0]} \
         --examples {params.examples} \
         --gvcf {params.gvcf} \
+        --include_med_dp \
         {params.model_args} \
         {params.phase_args} \
         --task {wildcards.N} \
