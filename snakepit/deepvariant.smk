@@ -1,4 +1,4 @@
-from pathlib import PurePath
+from pathlib import Path,PurePath
 from itertools import product
 
 class Default(dict):
@@ -9,7 +9,7 @@ def get_dir(base='work',ext='', **kwargs):
     if base == 'input':
         base_dir = config.get('bam_path','')
     elif base == 'output':
-        base_dir = 'output_DV2'
+        base_dir = 'output_DV'
     elif base == 'work':
         base_dir = get_dir('output','intermediate_results_{animal}',**kwargs)
     elif base == 'mendel':
@@ -76,11 +76,12 @@ rule all:
     input:
         capture_logic()
 
+PIG = list(range(1,19))
 def get_regions(wildcards):
     if 'regions' not in config:
         return ''
     elif config.get('regions',False) == 'autosomes':
-        return f'--regions "{" ".join(map(str,range(1,30)))}"'
+        return f'--regions "{" ".join(map(str,PIG))}"'
     else:
         return f'--regions {wildcards.chromosome}'
 
@@ -96,7 +97,7 @@ rule deepvariant_make_examples:
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         phase_args = lambda wildcards: '--parse_sam_aux_fields={i} --sort_by_haplotypes={i}'.format(i=('true' if False else 'false')),
         model_args = lambda wildcards: '--add_hp_channel --alt_aligned_pileup diff_channels --realign_reads=false --vsc_min_fraction_indels 0.12' if 'bwa' == 'pbmm2' else '',
-        singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/'),
+        singularity_call = lambda wildcards,input: make_singularity_call(wildcards,input_bind=False,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:{PurePath(input.bam[0]).parent}'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
         regions = lambda wildcards: get_regions(wildcards) #f'--regions "{" ".join(map(str,range(1,30)))}"' if config.get('autosomes',False) else ''
     threads: 1
@@ -106,6 +107,7 @@ rule deepvariant_make_examples:
         disk_scratch = 1,
         use_singularity = True
     shell:
+        #--include_med_dp \
         '''
         {params.singularity_call} \
         {config[DV_container]} \
@@ -115,7 +117,6 @@ rule deepvariant_make_examples:
         --reads {input.bam[0]} \
         --examples {params.examples} \
         --gvcf {params.gvcf} \
-        --include_med_dp \
         {params.regions} \
         {params.model_args} \
         {params.phase_args} \
@@ -134,12 +135,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 18
+    threads: 24
     resources:
         mem_mb = 2500,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '24:00',
+        walltime = lambda wildcards: '4:00',
         use_AVX512 = True
     shell:
         '''
@@ -188,14 +189,14 @@ rule split_gvcf_chromosomes:
     input:
         get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz',chromosome = config.get('regions','all'))
     output:
-        gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in range(1,30))),
-        tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in range(1,30)))
+        gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in PIG)),
+        tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in PIG))
     threads: 1
     resources:
         mem_mb = 3000,
         walltime = '25'
     run:
-        for chromosome in range(1,30):
+        for chromosome in PIG:
             out_file = output.gvcf[chromosome-1]
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
@@ -203,7 +204,7 @@ rule split_gvcf_chromosomes:
 rule GLnexus_merge_chrm:
     input:
         vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
-        tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
+        #tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
         multiext(get_dir('main','cohort.{chr,\d+}.vcf.gz'),'','.tbi')
     params:
@@ -236,8 +237,8 @@ rule GLnexus_merge_chrm:
 
 rule aggregate_autosomes:
     input:
-        vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=range(1,30)),
-        tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=range(1,30)),
+        vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=PIG),
+        #tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=PIG),
     output:
         multiext(get_dir('main','cohort.autosomes.vcf.gz'),'','.tbi')
     threads: 8
@@ -252,7 +253,7 @@ rule aggregate_autosomes:
 
 rule GLnexus_merge:
     input:
-        expand(get_dir('output','{animal}.bwa.g.vcf.gz'),animal=config['animals'])
+        expand(get_dir('output','{animal}.bwa.all.g.vcf.gz'),animal=config['animals'])
     output:
         multiext(get_dir('main','cohort.all.vcf.gz'),'','.tbi')
     params:
@@ -278,7 +279,7 @@ rule GLnexus_merge:
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
-        | bcftools view - | bgzip -@ 4 -c > {params.out}"
+        | bcftools view - | bgzip -@ {threads} -c > {params.out}"
         tabix -p vcf {output[0]}
         '''
         
