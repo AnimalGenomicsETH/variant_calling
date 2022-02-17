@@ -40,7 +40,8 @@ rule recalibrator_creator:
         OUTDIR + "/bam_recal/{sample}_recalibrator.table"
     threads: 1
     resources:
-        mem_mb = 5000
+        mem_mb = 5000,
+        walltime = '24:00'
     params:
         chr = int_list
     shell:
@@ -58,7 +59,8 @@ rule base_recalibrator:
         temp(OUTDIR + "/bam_recal/{sample}_recalibrated.bam")
     threads: 1
     resources:
-        mem_mb = 5000
+        mem_mb = 5000,
+        walltime = '24:00'
     params:
         chr = int_list
     shell:
@@ -75,31 +77,32 @@ rule Haplotype_caller:
         config['gvcf'] + "/{chromosome}/{sample}.g.vcf.gz"
     threads: 1
     resources:
-        mem_mb = 10000,
+        mem_mb = 6000,
         walltime = '24:00'
     shell:
         '''
-        gatk --java-options "-Xmx10g -XX:ParallelGCThreads=2" HaplotypeCaller -I {input} -R {config[reference]} -L {wildcards.chromosome} -O {output} --ERC GVCF
+        gatk HaplotypeCaller -I {input} -R {config[reference]} -L {wildcards.chromosome} -O {output} --ERC GVCF
         '''
 
 rule combinegvcf:
     input:
-        offspring = (config['gvcf'] + f'/{{chr}}/{sample}.g.vcf.gz' for sample in config['animals']),
+        gvcf = (config['gvcf'] + f'/{{chr}}/{sample}.g.vcf.gz' for sample in config['animals']),
     output:
         config['out'] + '/{chr}.gatk4.vcf.gz'
     params:
         dir_ = lambda wildcards, output: PurePath(output[0]).parent,
-        gvcf = (f'-V {x}' for x in config['animals'])
+        gvcf = lambda wildcards, input: ' '.join(f'-V {x}' for x in input.gvcf)
     threads: 1
     resources:
-        mem_mb = 6000,
-        disk_scratch=30,
-        walltime = '60'
+        mem_mb = 20000,
+        disk_scratch=40,
+        walltime = '24:00'
     shell:
         '''
         mkdir -p {params.dir_}
         export TILEDB_DISABLE_FILE_LOCKING=1
         cd $TMPDIR
+        pwd
         cp {input} .
         gatk \
         GenomicsDBImport \
