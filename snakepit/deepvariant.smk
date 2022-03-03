@@ -76,12 +76,13 @@ rule all:
     input:
         capture_logic()
 
-PIG = list(range(1,19))
+CHROMOSOMES = list(range(1,config.get('chromosomes',30)))
+
 def get_regions(wildcards):
-    if 'regions' not in config:
+    if config.get('regions','all') == 'all':
         return ''
     elif config.get('regions',False) == 'autosomes':
-        return f'--regions "{" ".join(map(str,PIG))}"'
+        return f'--regions "{" ".join(map(str,CHROMOSOMES))}"'
     else:
         return f'--regions {wildcards.chromosome}'
 
@@ -135,13 +136,13 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 24
+    threads: 18
     resources:
-        mem_mb = 2500,
+        mem_mb = 2000,
         disk_scratch = 1,
         use_singularity = True,
         walltime = lambda wildcards: '4:00',
-        use_AVX512 = True
+        #use_AVX512 = True
     shell:
         '''
         {params.singularity_call} \
@@ -189,14 +190,14 @@ rule split_gvcf_chromosomes:
     input:
         get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz',chromosome = config.get('regions','all'))
     output:
-        gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in PIG)),
-        tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in PIG))
+        gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in CHROMOSOMES)),
+        tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in CHROMOSOMES))
     threads: 1
     resources:
         mem_mb = 3000,
-        walltime = '25'
+        walltime = '3:25'
     run:
-        for chromosome in PIG:
+        for chromosome in CHROMOSOMES:
             out_file = output.gvcf[chromosome-1]
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
@@ -237,8 +238,8 @@ rule GLnexus_merge_chrm:
 
 rule aggregate_autosomes:
     input:
-        vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=PIG),
-        #tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=PIG),
+        vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=CHROMOSOMES),
+        #tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=CHROMOSOMES),
     output:
         multiext(get_dir('main','cohort.autosomes.vcf.gz'),'','.tbi')
     threads: 8
