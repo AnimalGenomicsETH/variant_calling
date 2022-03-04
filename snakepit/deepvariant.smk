@@ -76,7 +76,7 @@ rule all:
     input:
         capture_logic()
 
-CHROMOSOMES = list(range(1,config.get('chromosomes',30)))
+CHROMOSOMES = list(range(1,config.get('chromosomes',30))) + ['X','Y','0']
 
 def get_regions(wildcards):
     if config.get('regions','all') == 'all':
@@ -104,7 +104,7 @@ rule deepvariant_make_examples:
     threads: 1
     resources:
         mem_mb = 6000,
-        walltime = '4:00',
+        walltime = '24:00',
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -141,7 +141,7 @@ rule deepvariant_call_variants:
         mem_mb = 2000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '4:00',
+        walltime = lambda wildcards: '24:00',
         #use_AVX512 = True
     shell:
         '''
@@ -197,8 +197,10 @@ rule split_gvcf_chromosomes:
         mem_mb = 3000,
         walltime = '3:25'
     run:
-        for chromosome in CHROMOSOMES:
-            out_file = output.gvcf[chromosome-1]
+        for idx, chromosome in enumerate(CHROMOSOMES):
+            out_file = output.gvcf[idx]
+            if chromosome == '0': #catch all unplaced contigs
+                chromosome = '$(tabix -l {input} | tail -n +32)' #HARDCODED FOR ARS
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
     
@@ -207,7 +209,7 @@ rule GLnexus_merge_chrm:
         vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
         #tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        multiext(get_dir('main','cohort.{chr,\d+}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.{chr,\d+|X|Y}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
@@ -256,7 +258,7 @@ rule GLnexus_merge:
     input:
         expand(get_dir('output','{animal}.bwa.all.g.vcf.gz'),animal=config['animals'])
     output:
-        multiext(get_dir('main','cohort.all.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.allX.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
@@ -265,9 +267,9 @@ rule GLnexus_merge:
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: 32 #force using threads for bgziping
     resources:
-        mem_mb = 7000,
+        mem_mb = 8000,
         disk_scratch = 500,
-        walltime = "4:00",
+        walltime = "24:00",
         use_singularity = True
     shell:
         '''
