@@ -26,7 +26,7 @@ else:
     ruleorder: deepvariant_postprocess > split_gvcf_chromosomes
 
 
-include: 'mendelian.smk'
+#include: 'mendelian.smk'
 
 wildcard_constraints:
     haplotype = r'asm|hap1|hap2|parent1|parent2',
@@ -199,15 +199,15 @@ rule split_gvcf_chromosomes:
     run:
         for idx, chromosome in enumerate(CHROMOSOMES):
             out_file = output.gvcf[idx]
-            if chromosome == '0': #catch all unplaced contigs
-                chromosome = '$(tabix -l {input} | tail -n +32)' #HARDCODED FOR ARS
+            if chromosome == '0': #catch all unplaced contigs INCLUDING MT contig
+                chromosome = f'$(tabix -l {{input}} | tail -n +{len(CHROMOSOMES)})' #HARDCODED FOR ARS
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
     
 rule GLnexus_merge_chrm:
     input:
         vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
-        #tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
+        tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
         multiext(get_dir('main','cohort.{chr,\d+|X|Y}.vcf.gz'),'','.tbi')
     params:
@@ -241,7 +241,7 @@ rule GLnexus_merge_chrm:
 rule aggregate_autosomes:
     input:
         vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=CHROMOSOMES),
-        #tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=CHROMOSOMES),
+        tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=CHROMOSOMES),
     output:
         multiext(get_dir('main','cohort.autosomes.vcf.gz'),'','.tbi')
     threads: 8
