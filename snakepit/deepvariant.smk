@@ -20,11 +20,19 @@ def get_dir(base='work',ext='', **kwargs):
         raise Exception('Base not found')
     return str(Path(base_dir.format_map(Default(kwargs))) / ext.format_map(Default(kwargs)))
 
+def get_walltime(wildcards, attempt):
+    return {1:'4:00',2:'24:00'}[attempt]
+
 if config.get("per_sample",True):
     ruleorder: split_gvcf_chromosomes > deepvariant_postprocess 
 else:
     ruleorder: deepvariant_postprocess > split_gvcf_chromosomes
 
+
+if config.get("merging","all") == "all":
+    ruleorder: GLnexus_merge > aggregate_autosomes
+else:
+    ruleorder: aggregate_autosomes > GLnexus_merge
 
 #include: 'mendelian.smk'
 
@@ -104,7 +112,7 @@ rule deepvariant_make_examples:
     threads: 1
     resources:
         mem_mb = 6000,
-        walltime = '24:00',
+        walltime = get_walltime,
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -141,7 +149,7 @@ rule deepvariant_call_variants:
         mem_mb = 2000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = lambda wildcards: '24:00',
+        walltime = '24:00' # get_walltime,
         #use_AVX512 = True
     shell:
         '''
@@ -170,7 +178,7 @@ rule deepvariant_postprocess:
     threads: 1
     resources:
         mem_mb = 50000,
-        walltime = '4:00',
+        walltime = get_walltime,
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -194,8 +202,8 @@ rule split_gvcf_chromosomes:
         tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in CHROMOSOMES))
     threads: 1
     resources:
-        mem_mb = 3000,
-        walltime = '3:25'
+        mem_mb = 4000,
+        walltime = '4:00'
     run:
         for idx, chromosome in enumerate(CHROMOSOMES):
             out_file = output.gvcf[idx]
@@ -243,11 +251,11 @@ rule aggregate_autosomes:
         vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=CHROMOSOMES),
         tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=CHROMOSOMES),
     output:
-        multiext(get_dir('main','cohort.autosomes.vcf.gz'),'','.tbi')
-    threads: 8
+        multiext(get_dir('main','cohort.all.vcf.gz'),'','.tbi')
+    threads: 12
     resources:
         mem_mb = 2000,
-        walltime = '60'
+        walltime = '4:00'
     shell:
         '''
         bcftools concat --threads {threads} -o {output[0]} -Oz {input.vcf}
@@ -258,11 +266,12 @@ rule GLnexus_merge:
     input:
         expand(get_dir('output','{animal}.bwa.all.g.vcf.gz'),animal=config['animals'])
     output:
-        multiext(get_dir('main','cohort.allX.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.all.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
+        preset = lambda wildcards: 'DeepVariantWGS' if True else 'DeepVariant_unfiltered', 
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: 32 #force using threads for bgziping
@@ -278,7 +287,7 @@ rule GLnexus_merge:
         {config[GL_container]} \
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
-        --config DeepVariantWGS \
+        --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
