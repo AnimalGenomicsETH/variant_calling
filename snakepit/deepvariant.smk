@@ -94,6 +94,8 @@ def get_regions(wildcards):
     else:
         return f'--regions {wildcards.chromosome}'
 
+
+#error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
         ref = multiext(config['reference'],'','.fai'),
