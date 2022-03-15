@@ -146,9 +146,9 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 18
+    threads: 24
     resources:
-        mem_mb = 2000,
+        mem_mb = 3000,
         disk_scratch = 1,
         use_singularity = True,
         walltime = '24:00' # get_walltime,
@@ -179,8 +179,8 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 50000,
-        walltime = get_walltime,
+        mem_mb = 70000,
+        walltime = '24:00', # get_walltime,
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -296,4 +296,34 @@ rule GLnexus_merge:
         | bcftools view - | bgzip -@ {threads} -c > {params.out}"
         tabix -p vcf {output[0]}
         '''
-        
+
+rule beagle_phase:
+    input:
+        get_dir('main','cohort.{chr}.vcf.gz')
+    output:
+        get_dir('main','cohort.{chr,\d+|X|Y}.beagle.vcf.gz')
+    threads: 8
+    resources:
+        mem_mb = 6000
+    params:
+        mem = lambda wilcards, resources, threads: int(threads*resources.mem_mb/1000),
+        out = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix(''),
+        ne = 200,
+        window = 60 #cM
+    shell:
+        '''
+        java -Xmx{params.mem}g -jar /cluster/work/pausch/alex/software/beagle.08Feb22.fa4.jar gt={input} out={params.out} nthreads={threads} window={params.window} ne={params.ne}
+        '''
+
+rule bcftools_stats:
+    input:
+        get_dir('main','cohort.{chr}.beagle.vcf.gz')
+    output:
+        get_dir('main','cohort.{chr,\d+|X|Y}.beagle.stats')
+    resources:
+        mem_mb = 5000
+    shell:
+        '''
+        tabix -fp vcf {input}
+        bcftools stats {input} > {output}
+        '''
