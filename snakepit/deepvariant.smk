@@ -84,7 +84,7 @@ rule all:
     input:
         capture_logic()
 
-CHROMOSOMES = list(range(1,config.get('chromosomes',30))) + ['X','Y','0']
+CHROMOSOMES = list(range(1,config.get('chromosomes',32))) + ['X','0']
 
 def get_regions(wildcards):
     if config.get('regions','all') == 'all':
@@ -146,12 +146,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
-    threads: 24
+    threads: 18
     resources:
-        mem_mb = 3000,
+        mem_mb = 2000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = '24:00' # get_walltime,
+        walltime = get_walltime,
         #use_AVX512 = True
     shell:
         '''
@@ -179,8 +179,8 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 70000,
-        walltime = '24:00', # get_walltime,
+        mem_mb = 50000,
+        walltime = get_walltime,
         disk_scratch = 1,
         use_singularity = True
     shell:
@@ -230,7 +230,7 @@ rule GLnexus_merge_chrm:
     threads: 12 #force using 4 threads for bgziping
     resources:
         mem_mb = 8000,
-        disk_scratch = 150,
+        disk_scratch = 50,
         walltime = '4:00',
         use_singularity = True
     shell:
@@ -263,24 +263,24 @@ rule aggregate_autosomes:
         bcftools concat --threads {threads} -o {output[0]} -Oz {input.vcf}
         tabix -p vcf {output[0]}
         '''
-
 rule GLnexus_merge:
     input:
         expand(get_dir('output','{animal}.bwa.all.g.vcf.gz'),animal=config['animals'])
     output:
-        multiext(get_dir('main','cohort.all.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.all.{FILT}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
-        preset = lambda wildcards: 'DeepVariantWGS' if True else 'DeepVariant_unfiltered', 
+        bed = lambda wildcards: '' if False else '--bed /data/BSW_autosome.bed',
+        preset = lambda wildcards: 'DeepVariantWGS' if wildcards.FILT == 'WGS' else 'DeepVariant_unfiltered', #'/data/deep.yml', 
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
-    threads: 32 #force using threads for bgziping
+    threads: 12 #force using threads for bgziping
     resources:
-        mem_mb = 8000,
-        disk_scratch = 500,
-        walltime = "24:00",
+        mem_mb = 4000,
+        disk_scratch = 50,
+        walltime = "4:00",
         use_singularity = True
     shell:
         '''
@@ -292,7 +292,7 @@ rule GLnexus_merge:
         --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
-        {params.gvcfs} \
+        {params.bed} {params.gvcfs} \
         | bcftools view - | bgzip -@ {threads} -c > {params.out}"
         tabix -p vcf {output[0]}
         '''
