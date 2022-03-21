@@ -7,8 +7,8 @@
 
 from pathlib import Path, PurePath
 
-config['reference'] ='/cluster/work/pausch/inputs/ref/SSC/11.1/Sus_scrofa.Sscrofa11.1.dna.toplevel.fa'
-config['bam_path'] = '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/SSC/bam'
+#config['reference'] ='/cluster/work/pausch/inputs/ref/SSC/11.1/Sus_scrofa.Sscrofa11.1.dna.toplevel.fa'
+#config['bam_path'] = '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/SSC/bam'
 
 BAMDIR = config['bam_path']
 
@@ -16,16 +16,21 @@ BAMDIR = config['bam_path']
 ## Parsing output directory
 
 ##Parsing wildcards
-chr_list = list(range(1,19))
+chr_list = list(range(1,config.get('chromosomes',29)+1))
 int_list = " ".join(["-L {}".format(i) for i in chr_list])
 
-config['gvcf']='/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/alex/DV_GATK_project/GATK_piggs/gvcf'
-config['out']='/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/alex/DV_GATK_project/GATK_piggs/joint_geno'
-config['vcf_beagle_path'] = '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/alex/DV_GATK_project/GATK_piggs/filtered'
+#config['gvcf']= '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/alex/DV_GATK_project/GATK_piggs/gvcf'
+#config['out']='/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/alex/DV_GATK_project/GATK_piggs/joint_geno'
+#config['vcf_beagle_path'] = '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/alex/DV_GATK_project/GATK_piggs/filtered'
+
+config['gvcf'] = 'gvcf'
+config['out'] = 'joint_geno'
+config['vcf_beagle_path'] = 'filtered'
 vcf_beagle_path = config['vcf_beagle_path']
+
 OUTDIR = config['out']
-config['db'] = '/cluster/work/pausch/adela/cache/pig_db_corr.vcf.gz'
-config['chip'] = '/cluster/work/pausch/adela/cache/pig_geno_corr.vcf.gz'
+#config['db'] = '/cluster/work/pausch/adela/cache/pig_db_corr.vcf.gz'
+#config['chip'] = '/cluster/work/pausch/adela/cache/pig_geno_corr.vcf.gz'
 
 rule all:
     input:
@@ -43,10 +48,11 @@ rule recalibrator_creator:
         mem_mb = 5000,
         walltime = '24:00'
     params:
-        chr = int_list
+        chr = int_list,
+        priors = '' if "db" not in config else f'--known-sites {config["db"]} --known-sites {config["chip"]}'
     shell:
         '''
-        gatk BaseRecalibrator -I {input} {params.chr} -R {config[reference]} --known-sites {config[db]} --known-sites {config[chip]} --lenient true -O {output}
+        gatk BaseRecalibrator -I {input} {params.chr} -R {config[reference]} {params.priors} --lenient true -O {output}
         '''
 
 ## TO DO: print reads each chromosome separately and joined 
