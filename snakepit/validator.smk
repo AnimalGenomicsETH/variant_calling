@@ -6,7 +6,7 @@ wildcard_constraints:
     collapse = r'none|all',
     cols = r'pos_only|bases',
     var = r'snp|indel',
-
+    caller = r'DV2_GL4|GATK|truth'
 #localrules: format_record_tsv, summarise_matches, variant_density, generate_karyotype
 
 class Default(dict):
@@ -53,17 +53,16 @@ rule all:
 
 rule bcftools_norm:
     input:
-        vcf = lambda wildcards: config[wildcards.imputed][wildcards.caller],
-        ref = config['ref']
+        vcf = lambda wildcards: config[wildcards.imputed][wildcards.caller]
     output:
         get_dir('main','{caller}.{imputed}.normed.vcf.gz')
     threads: 4
     resources:
-        mem_mb = 2000,
-        walltime = '30'
+        mem_mb = 3000,
+        walltime = '60'
     shell:
         '''
-        bcftools norm --threads {threads} -m- -f {input.ref} -Oz -o {output} {input.vcf}
+        bcftools norm --threads {threads} -m- -f {config[reference]} -Oz -o {output} {input.vcf}
         tabix -p vcf {output}
         '''
 
@@ -212,7 +211,7 @@ rule variant_density:
 
 rule generate_karyotype:
     input:
-        config['ref'] + ".fai"
+        config['reference'] + ".fai"
     output:
         'ref.karotype.tsv'
     shell:
@@ -234,9 +233,9 @@ rule plot_density:
 
 rule get_snps:
     input:
-        get_dir('main','{caller}.normed.vcf.gz')
+        get_dir('main','{caller}.{imputed}.normed.vcf.gz')
     output:
-        get_dir('main','{caller}.normed.snp.vcf')
+        get_dir('main','{caller}.{imputed}.normed.snp.vcf.gz')
     shell:
         'bcftools view -m2 -M2 -v snps -o {output} {input}'
 
@@ -245,13 +244,14 @@ rule get_snps:
 
 rule picard_concordance:
     input:
-        query = get_dir('main','{caller}.{imputed}.normed.snp.vcf'),
+        query = get_dir('main','{caller}.{imputed}.normed.snp.vcf.gz'),
         truth = lambda wildcards: config['chips'][wildcards.chip]['vcf']
     output:
-        multiext(get_dir('concordance','{sample}.{chip}.{caller}.{imputed}'),'.conc','.metrics')
+        GC = multiext(get_dir('concordance','{sample}.{chip}.{caller}.{imputed}'),'.conc','.metrics'),
+        vcf = get_dir('concordance','{sample}_{caller}_{chip}.{imputed}.genotype_concordance.vcf.gz')
     params:
         ID = lambda wildcards: config['chips'][wildcards.chip][wildcards.sample],
-        gc_out = lambda wildcards,output: PurePath(output[0]).parent / f'{wildcards.sample}_{wildcards.caller}'
+        gc_out = lambda wildcards,output: PurePath(output[0]).parent / f'{wildcards.sample}_{wildcards.caller}_{wildcards.chip}.{wildcards.imputed}'
     threads: 1
     resources:
         mem_mb = 25000,
@@ -261,9 +261,9 @@ rule picard_concordance:
         'picard/2.25.7'
     shell:
         '''
-        picard GenotypeConcordance CALL_VCF={input.query} TRUTH_VCF={input.truth} CALL_SAMPLE={wildcards.sample} TRUTH_SAMPLE={params.ID} O={params.gc_out}
-        tail -n 4 {params.gc_out}.genotype_concordance_summary_metrics | awk '$1~/SNP/ {{print $2"\t{wildcards.caller}\t"$10"\t"$12"\t"2*$4*$5/($4+$5)"\t"2*$7*$8/($7+$8)"\t"2*$10*$11/($10+$11)"\t"$13"\t"$14}}' > {output[0]}
-        awk '$1~/SNP/ {{print $3"\t{wildcards.chip}\t{wildcards.caller}\t"$4"\t"$5"\t"$6}}' {params.gc_out}.genotype_concordance_detail_metrics > {output[1]} 
+        picard GenotypeConcordance CALL_VCF={input.query} TRUTH_VCF={input.truth} CALL_SAMPLE={wildcards.sample} TRUTH_SAMPLE={params.ID} O={params.gc_out} OUTPUT_VCF=true
+        tail -n 4 {params.gc_out}.genotype_concordance_summary_metrics | awk '$1~/SNP/ {{print $2"\t{wildcards.caller}\t"$10"\t"$12"\t"2*$4*$5/($4+$5)"\t"2*$7*$8/($7+$8)"\t"2*$10*$11/($10+$11)"\t"$13"\t"$14}}' > {output.GC[0]}
+        awk '$1~/SNP/ {{print $3"\t{wildcards.chip}\t{wildcards.caller}\t"$4"\t"$5"\t"$6}}' {params.gc_out}.genotype_concordance_detail_metrics > {output.GC[1]} 
         '''
         
 def ID_concordances():
@@ -288,19 +288,40 @@ rule aggreate_concordance:
         cat {input.metrics} | awk '{{print $0"\\t{wildcards.imputed}"}}' >> {output[1]}
         '''
 
+
+rule locate_disconcordant:
+    input:
+        get_dir('concordance','{ID}_{caller}_{chip}.{imputed}.genotype_concordance.vcf.gz')
+    output:
+        get_dir('concordance','{ID}_{caller}_{chip}.{imputed}.discon.bed')
+    shell:
+        '''
+        bcftools view -H -i 'F_MISSING<0.1' {input} | grep -E "F(P|N)" | awk '{print $1"\t"$2"\t"$2+1}' > {output}
+        '''
+
+rule merge_beds:
+    input:
+        (get_dir('concordance','{ID}_{caller}_{chip}.{imputed}.discon.bed',ID=I) for I in ID_concordances())
+    output:
+        get_dir('concordance','{caller}.{imputed}.discon.bed')
+    shell:
+        '''
+        bedtools merge -i {input} > {output}
+        '''
+
 rule snp_sites:
     input:
-        '{caller}.vcfs.normed.snp.vcf'
+        lambda wildcards: '{caller}.vcfs.normed.snp.vcf.gz' if wildcards.caller != 'truth' else config['truth']
     output:
         '{caller}.vcfs.normed.snp.bed'
     shell:
         '''
-        grep -v '^#' {input} | awk -v OFS='\t' '{if(length($4) > length($5)) print $1,$2,$2+length($4)-1; else print $1,$2-1,$2+length($5)-1}' > {output}
+        zgrep -v '^#' {input} | awk -v OFS='\t' '{{if(length($4) > length($5)) print $1,$2,$2+length($4)-1; else print $1,$2-1,$2+length($5)-1}}' > {output}
         '''
 
 rule bedtools_intersect:
     input:
-        (f'{caller}.vcfs.normed.snp.bed' for caller in ('DV2_GL4','GATK_L','truth'))
+        (f'{caller}.vcfs.normed.snp.bed' for caller in ('DV','GATK','truth'))
     output:
         'intersections.txt'
     shell:
