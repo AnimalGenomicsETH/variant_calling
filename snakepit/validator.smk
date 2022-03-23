@@ -6,7 +6,7 @@ wildcard_constraints:
     collapse = r'none|all',
     cols = r'pos_only|bases',
     var = r'snp|indel',
-    caller = r'DV2_GL4|GATK|truth'
+    caller = r'DV|DV2_GL4|GATK|truth'
 #localrules: format_record_tsv, summarise_matches, variant_density, generate_karyotype
 
 class Default(dict):
@@ -248,10 +248,10 @@ rule picard_concordance:
         truth = lambda wildcards: config['chips'][wildcards.chip]['vcf']
     output:
         GC = multiext(get_dir('concordance','{sample}.{chip}.{caller}.{imputed}'),'.conc','.metrics'),
-        vcf = get_dir('concordance','{sample}_{caller}_{chip}.{imputed}.genotype_concordance.vcf.gz')
+        vcf = get_dir('concordance','{sample}.{chip}_{caller}.{imputed}.genotype_concordance.vcf.gz')
     params:
         ID = lambda wildcards: config['chips'][wildcards.chip][wildcards.sample],
-        gc_out = lambda wildcards,output: PurePath(output[0]).parent / f'{wildcards.sample}_{wildcards.caller}_{wildcards.chip}.{wildcards.imputed}'
+        gc_out = lambda wildcards,output: PurePath(output[0]).parent / f'{wildcards.sample}.{wildcards.chip}_{wildcards.caller}.{wildcards.imputed}'
     threads: 1
     resources:
         mem_mb = 25000,
@@ -291,23 +291,51 @@ rule aggreate_concordance:
 
 rule locate_disconcordant:
     input:
-        get_dir('concordance','{ID}_{caller}_{chip}.{imputed}.genotype_concordance.vcf.gz')
+        get_dir('concordance','{ID}_{caller}.{imputed}.genotype_concordance.vcf.gz')
     output:
-        get_dir('concordance','{ID}_{caller}_{chip}.{imputed}.discon.bed')
+        get_dir('concordance','{ID}_{caller}.{imputed}.discon.bed')
     shell:
         '''
-        bcftools view -H -i 'F_MISSING<0.1' {input} | grep -E "F(P|N)" | awk '{print $1"\t"$2"\t"$2+1}' > {output}
+        bcftools view -H -i 'F_MISSING<0.1' {input} | grep -E "F(P|N)" | awk '{{print $1"\t"$2"\t"$2+1}}' > {output}
         '''
 
 rule merge_beds:
     input:
-        (get_dir('concordance','{ID}_{caller}_{chip}.{imputed}.discon.bed',ID=I) for I in ID_concordances())
+        (get_dir('concordance','{ID}_{caller}.{imputed}.discon.bed',ID=I) for I in ID_concordances())
     output:
         get_dir('concordance','{caller}.{imputed}.discon.bed')
     shell:
         '''
-        bedtools merge -i {input} > {output}
+        bedtools merge -i <(cat {input} | sort -k1,1n -k2,2n) > {output}
         '''
+
+rule multiinter:
+    input:
+        nh = 'non_human.bed',
+        DV = get_dir('concordance','DV.vcfs.discon.bed'),
+        GATK = get_dir('concordance','GATK.vcfs.discon.bed')
+    output:
+        'intersections_bed.txt'
+    shell:
+        '''
+        bedtools multiinter -i {input.DV} {input.GATK} {input.nh} | awk '{{print $5}}' | sort | uniq -c > {output}
+        '''
+
+rule align_genome:
+    output:
+        h = 'human.bed',
+        nh = 'non_human.bed'
+    threads: 4
+    resources:
+        mem_mb = 20000
+    params:
+        regions = ' '.join(map(str,range(1,config['chromosomes']+1)))
+    shell:
+        '''
+        minimap2 -t {threads} -s100 -z200 -N50 --min-occ-floor=100 /cluster/work/pausch/alex/GRCh38.autosomes.fasta <(samtools faidx {config[reference]} {params.regions}) | cut -f 1,3-4 | sort -k1,1n -k2,2n > {output.h}
+        bedtools complement -L -i {output.h} -g {config[reference]}.fai > {output.nh}
+        '''
+
 
 rule snp_sites:
     input:
