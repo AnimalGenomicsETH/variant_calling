@@ -117,6 +117,7 @@ rule deepvariant_make_examples:
         walltime = get_walltime,
         disk_scratch = 1,
         use_singularity = True
+    priority: 75
     shell:
         #--include_med_dp \
         '''
@@ -148,11 +149,12 @@ rule deepvariant_call_variants:
         vino = lambda wildcards: '--use_openvino'
     threads: 18
     resources:
-        mem_mb = 2000,
+        mem_mb = 3000,
         disk_scratch = 1,
         use_singularity = True,
-        walltime = get_walltime,
+        walltime = '24:00' #get_walltime,
         #use_AVX512 = True
+    priority: 100
     shell:
         '''
         {params.singularity_call} \
@@ -183,6 +185,7 @@ rule deepvariant_postprocess:
         walltime = get_walltime,
         disk_scratch = 1,
         use_singularity = True
+    priority: 100
     shell:
         '''
         {params.singularity_call} \
@@ -219,11 +222,12 @@ rule GLnexus_merge_chrm:
         vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
         tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        multiext(get_dir('main','cohort.{chr,\d+|X|Y}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.{chr,\d+|X|Y}.{preset}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
+        preset = lambda wildcards: 'DeepVariantWGS' if wildcards.FILT == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered',
         bed = lambda wildcards: '' if True else '--bed /data/BSW_autosome.bed',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
@@ -233,6 +237,7 @@ rule GLnexus_merge_chrm:
         disk_scratch = 50,
         walltime = '4:00',
         use_singularity = True
+    priority: 25
     shell:
         '''
         ulimit -Sn 4096
@@ -240,7 +245,7 @@ rule GLnexus_merge_chrm:
         {config[GL_container]} \
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
-        --config DeepVariantWGS \
+        --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.bed} {params.gvcfs} \
@@ -250,10 +255,10 @@ rule GLnexus_merge_chrm:
 
 rule aggregate_autosomes:
     input:
-        vcf = expand(get_dir('main','cohort.{chr}.vcf.gz'),chr=CHROMOSOMES),
-        tbi = expand(get_dir('main','cohort.{chr}.vcf.gz.tbi'),chr=CHROMOSOMES),
+        vcf = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz') for CHR in CHROMOSOMES),
+        tbi = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz.tbi') for CHR in CHROMOSOMES),
     output:
-        multiext(get_dir('main','cohort.all.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.all.{preset}.vcf.gz'),'','.tbi')
     threads: 12
     resources:
         mem_mb = 2000,
@@ -273,7 +278,7 @@ rule GLnexus_merge:
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         bed = lambda wildcards: '' if False else '--bed /data/BSW_autosome.bed',
-        preset = lambda wildcards: 'DeepVariantWGS' if wildcards.FILT == 'WGS' else 'DeepVariant_unfiltered', #'/data/deep.yml', 
+        preset = lambda wildcards: 'DeepVariantWGS' if wildcards.FILT == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered', #'/data/deep.yml', 
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: 12 #force using threads for bgziping
