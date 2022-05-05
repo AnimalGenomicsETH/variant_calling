@@ -2,13 +2,16 @@
 
 reference: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
 bam_path: '/cluster/work/pausch/vcf_UCD/2022_03/bam_repository'
+
 shards: 24
 regions: 'all'
 merging: 'chromosomes'
 model: 'bwa'
 haplotype: 'asm'
+
 DV_container: '/cluster/work/pausch/alex/images/deepvariant_1.3.0.sif'
 GL_container: '/cluster/work/pausch/alex/images/glnexus_v1.4.1.sif'
+GL_config: 'GL_DV_raw.yml'
 
 
 animals:

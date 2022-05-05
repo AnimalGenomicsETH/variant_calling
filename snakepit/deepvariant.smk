@@ -217,6 +217,15 @@ rule split_gvcf_chromosomes:
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
 
+def get_GL_config(preset):
+    if preset == 'WGS':
+        return 'DeepVariantWGS'
+    elif preset == 'Unfiltered':
+        return 'DeepVariant_unfiltered'
+    elif 'GL_config' in config:
+        return config['GL_config']
+    else:
+        raise ValueError(f'Unknown config {preset=}')
 
 rule GLnexus_merge_chrm:
     input:
@@ -228,7 +237,7 @@ rule GLnexus_merge_chrm:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
-        preset = lambda wildcards: 'DeepVariantWGS' if wildcards.preset == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered',
+        preset = lambda wildcards: get_GL_config(wildcards.preset), #'DeepVariantWGS' if wildcards.preset == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered',
         bed = lambda wildcards: '' if True else '--bed /data/BSW_autosome.bed',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
@@ -279,7 +288,7 @@ rule GLnexus_merge:
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         bed = lambda wildcards: '' if False else '--bed /data/BSW_autosome.bed',
-        preset = lambda wildcards: 'DeepVariantWGS' if wildcards.FILT == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered', #'/data/deep.yml', 
+        preset = lambda wildcards: get_GL_config(wildcards.preset), #lambda wildcards: 'DeepVariantWGS' if wildcards.FILT == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered', #'/data/deep.yml', 
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: 12 #force using threads for bgziping
