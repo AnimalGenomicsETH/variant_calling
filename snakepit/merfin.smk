@@ -73,6 +73,15 @@ rule merfin_lookup:
 #    output:
 #        temp('
 
+
+def merfin_fitting(wildcards,lookup,model):
+    if wildcards.fitted == 'fitted':
+        return f'-prob {lookup} -peak {float([line for line in open(model)][7].split()[1])}'
+    elif wildcards.fitted == 'coverage':
+        return f'-peak {config["samples"][wildcards.sample]}'
+    else:
+        return ''
+
 rule merfin_filter:
     input:
         seqmers = 'readmers/ARS.seqmers.meryl',
@@ -84,10 +93,10 @@ rule merfin_filter:
         'merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf'
     params:
         out = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix(''),
-        fitted = lambda wildcards, input: f'-peak {config["samples"][wildcards.sample]}' if wildcards.fitted != 'fitted' else f'-prob {input.lookup} -peak {float([line for line in open(input.model)][7].split()[1])}'# if wildcards.fitted == 'fitted' else ''
-    threads: 12
+        fitted = lambda wildcards, input: merfin_fitting(wildcards,input.lookup,input.model) #f'-peak {config["samples"][wildcards.sample]}' if wildcards.fitted != 'fitted' else f'-prob {input.lookup} -peak {float([line for line in open(input.model)][7].split()[1])}'# if wildcards.fitted == 'fitted' else ''
+    threads: 8
     resources:
-        mem_mb = 7000,
+        mem_mb = 5000,
         walltime = '24:00'
     shell:
         '''
