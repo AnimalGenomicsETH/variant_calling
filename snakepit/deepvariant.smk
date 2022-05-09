@@ -265,8 +265,8 @@ rule GLnexus_merge_chrm:
 
 rule aggregate_autosomes:
     input:
-        vcf = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz') for CHR in CHROMOSOMES),
-        tbi = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz.tbi') for CHR in CHROMOSOMES),
+        vcf = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz',CHR=CHR) for CHR in CHROMOSOMES),
+        tbi = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz.tbi',CHR=CHR) for CHR in CHROMOSOMES),
     output:
         multiext(get_dir('main','cohort.autosomes.{preset}.vcf.gz'),'','.tbi')
     threads: 12
