@@ -76,9 +76,9 @@ def capture_logic():
     if 'trios' in config:
         return [get_dir('main','mendel.{caller}.autosomes.summary.df',caller=caller) for caller in ('DV','GATK')]
     elif config.get('regions') == 'autosomes':
-        return [get_dir('main','cohort.autosomes.vcf.gz')]
+        return [get_dir('main','cohort.autosomes.WGS.vcf.gz')]
     else:
-        return [get_dir('main','cohort.all.vcf.gz')]
+        return [get_dir('main','cohort.all.WGS.vcf.gz')]
 
 rule all:
     input:
@@ -268,7 +268,7 @@ rule aggregate_autosomes:
         vcf = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz') for CHR in CHROMOSOMES),
         tbi = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz.tbi') for CHR in CHROMOSOMES),
     output:
-        multiext(get_dir('main','cohort.all.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.autosomes.{preset}.vcf.gz'),'','.tbi')
     threads: 12
     resources:
         mem_mb = 2000,
@@ -282,7 +282,7 @@ rule GLnexus_merge:
     input:
         expand(get_dir('output','{animal}.bwa.all.g.vcf.gz'),animal=config['animals'])
     output:
-        multiext(get_dir('main','cohort.all.{FILT}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.all.{preset}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
