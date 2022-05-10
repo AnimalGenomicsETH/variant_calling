@@ -3,6 +3,7 @@ from pathlib import PurePath
 rule all:
     input:
         'merfin_filtering.csv',
+        expand('merfin/{sample}_merfin.upset',sample=config['samples']),
         expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
 
 def get_fastq(sample):
@@ -92,7 +93,7 @@ rule merfin_filter:
     input:
         seqmers = 'readmers/ARS.seqmers.meryl',
         readmers = 'readmers/{sample}.readmers.gt1.SR.meryl',
-        vcf = 'merfin/{sample}.{vcf}.vcf.gz'), #lambda wildcards: config['vcfs'][wildcards.vcf],
+        vcf = 'merfin/{sample}.{vcf}.vcf.gz', #lambda wildcards: config['vcfs'][wildcards.vcf],
         lookup = lambda wildcards: 'readmers/{sample}/lookup_table.txt' if wildcards.fitted == 'fitted' else [],
         model = lambda wildcards: 'readmers/{sample}/model.txt' if wildcards.fitted == 'fitted' else []
     output:
@@ -143,13 +144,27 @@ rule tabulate_results:
 
 rule bcftools_isec:
     input:
-        expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
+        vcfs = expand('merfin/{{sample}}.{vcf}.vcf.gz',vcf=config['vcfs']),
+        filtered = expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
     output:
-        directory('merfin/{sample}_merfin_isec')
+        temp(directory('merfin/{sample}_merfin_isec'))
     threads: 2
     resources:
         mem_mb = 4000
     shell:
         '''
         bcftools isec -p {output} -Oz --threads {threads} {input}
+        '''
+
+rule upset_format:
+    input:
+        'merfin/{sample}_merfin_isec'
+    output:
+        'merfin/{sample}_merfin.upset'
+    shell:
+        '''
+        for i in {input}/*gz;
+        do
+          echo -n "$(bcftools index -n $i)," >> {output}
+        done
         '''
