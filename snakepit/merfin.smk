@@ -71,7 +71,7 @@ rule bcftools_extract:
     input:
         vcf = lambda wildcards: config['vcfs'][wildcards.vcf]
     output:
-        temp('merfin/{sample}.{vcf}.vcf.gz')
+        temp('vcfs/{sample}.{vcf}.vcf.gz')
     resources:
         mem_mb = 4000
     shell:
@@ -93,7 +93,7 @@ rule merfin_filter:
     input:
         seqmers = 'readmers/ARS.seqmers.meryl',
         readmers = 'readmers/{sample}.readmers.gt1.SR.meryl',
-        vcf = 'merfin/{sample}.{vcf}.vcf.gz', #lambda wildcards: config['vcfs'][wildcards.vcf],
+        vcf = 'vcfs/{sample}.{vcf}.vcf.gz', #lambda wildcards: config['vcfs'][wildcards.vcf],
         lookup = lambda wildcards: 'readmers/{sample}/lookup_table.txt' if wildcards.fitted == 'fitted' else [],
         model = lambda wildcards: 'readmers/{sample}/model.txt' if wildcards.fitted == 'fitted' else []
     output:
@@ -126,7 +126,7 @@ rule bcftools_sort:
         
 rule tabulate_results:
     input:
-        vcfs = expand('merfin/{sample}.{vcf}.vcf.gz',sample=config['samples'],vcf=config['vcfs']),
+        vcfs = expand('vcfs/{sample}.{vcf}.vcf.gz',sample=config['samples'],vcf=config['vcfs']),
         merfins = expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
     output:
         'merfin_filtering.csv'
@@ -144,7 +144,7 @@ rule tabulate_results:
 
 rule bcftools_isec:
     input:
-        vcfs = expand('merfin/{{sample}}.{vcf}.vcf.gz',vcf=config['vcfs']),
+        vcfs = expand('vcfs/{{sample}}.{vcf}.vcf.gz',vcf=config['vcfs']),
         filtered = expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
     output:
         'merfin/{sample}_merfin.intersections'
