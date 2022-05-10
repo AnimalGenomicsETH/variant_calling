@@ -59,19 +59,25 @@ rule merfin_lookup:
         'readmers/{sample}/lookup_table.txt',
         'readmers/{sample}/model.txt'
     params:
-        out = lambda wildcards, output: PurePath(output[0]).parent,
-        ploidy = 1#lambda wildcards: 2 if wildcards.haplotype == 'asm' else 2
+        out = lambda wildcards, output: PurePath(output[0]).parent
     envmodules:
         'gcc/8.2.0',
         'r/4.0.2'
     shell:
-        'Rscript /cluster/work/pausch/alex/software/genomescope2.0/genomescope.R -i {input} -k 21 -o {params.out} --fitted_hist -p {params.ploidy}'
+        'Rscript /cluster/work/pausch/alex/software/genomescope2.0/genomescope.R -i {input} -k 21 -o {params.out} --fitted_hist -p 2'
 
-#rule bcftools_extract:
-#    input:
-#        vcf = lambda wildcards: config['vcfs'][wildcards.vcf]
-#    output:
-#        temp('
+rule bcftools_extract:
+    input:
+        vcf = lambda wildcards: config['vcfs'][wildcards.vcf]
+    output:
+        temp('merfin/{sample}.{vcf}.vcf.gz')
+    resources:
+        mem_mb = 4000
+    shell:
+         '''
+         bcftools view -s {wildcards.sample} {input.vcf} | bcftools view -i 'GT[*]="alt"' | bcftools norm -m- any -f {config[reference]} -o {output} 
+         tabix -fp vcf {output}
+         '''
 
 
 def merfin_fitting(wildcards,lookup,model):
@@ -86,39 +92,23 @@ rule merfin_filter:
     input:
         seqmers = 'readmers/ARS.seqmers.meryl',
         readmers = 'readmers/{sample}.readmers.gt1.SR.meryl',
-        vcf = lambda wildcards: config['vcfs'][wildcards.vcf],
+        vcf = 'merfin/{sample}.{vcf}.vcf.gz'), #lambda wildcards: config['vcfs'][wildcards.vcf],
         lookup = lambda wildcards: 'readmers/{sample}/lookup_table.txt' if wildcards.fitted == 'fitted' else [],
         model = lambda wildcards: 'readmers/{sample}/model.txt' if wildcards.fitted == 'fitted' else []
     output:
         'merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf'
     params:
         out = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix(''),
-        fitted = lambda wildcards, input: merfin_fitting(wildcards,input.lookup,input.model) #f'-peak {config["samples"][wildcards.sample]}' if wildcards.fitted != 'fitted' else f'-prob {input.lookup} -peak {float([line for line in open(input.model)][7].split()[1])}'# if wildcards.fitted == 'fitted' else ''
+        fitted = lambda wildcards, input: merfin_fitting(wildcards,input.lookup,input.model)
     threads: 8
     resources:
         mem_mb = 5000,
         walltime = '24:00'
     shell:
         '''
-        /cluster/work/pausch/alex/software/MERFIN_NEW/build/bin/merfin -filter -sequence {config[reference]} -seqmers {input.seqmers} {params.fitted} -readmers {input.readmers} -threads {threads} -vcf <(bcftools view -s {wildcards.sample} {input.vcf} | bcftools view -i 'GT[*]="alt"') -output {params.out}
+        /cluster/work/pausch/alex/software/MERFIN_NEW/build/bin/merfin -filter -sequence {config[reference]} -seqmers {input.seqmers} {params.fitted} -readmers {input.readmers} -threads {threads} -vcf {input.vcf} -output {params.out}
         '''
-
-rule tabulate_results:
-    input:
-        expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
-    output:
-        'merfin_filtering.csv'
-    params:
-        samples = config['samples']
-    shell:
-        '''
-        echo sample,DV,DV_merfin,GATK,GATK_merfin > {output}
-        for sample in {params.samples};
-        do
-          echo $sample,$(grep "records:" $(ls -rt logs/merfin_filter/sample-$sample.vcf-DV.fitted-raw*err | head -n 1) | awk '{{print $2}}'),$(wc -l < <(grep -v "#" merfin/$sample.DV.merfin.raw.filter.vcf)),$(grep "records:" $(ls -rt logs/merfin_filter/sample-$sample.vcf-GATK.fitted-raw*err | head -n 1) | awk '{{print $2}}'),$(wc -l < <(grep -v "#" merfin/$sample.GATK.merfin.raw.filter.vcf)) >> {output}
-        done
-        '''
-
+        
 rule bcftools_sort:
     input:
         'merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf'
@@ -132,14 +122,34 @@ rule bcftools_sort:
         bcftools sort -T $TMPDIR -o {output} {input}
         tabix -fp vcf {output}
         '''
+        
+rule tabulate_results:
+    input:
+        vcfs = expand('merfin/{sample}.{vcf}.vcf.gz',sample=config['samples'],vcf=config['vcfs']),
+        merfins = expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
+    output:
+        'merfin_filtering.csv'
+    params:
+        samples = config['samples']
+    shell:
+        '''
+        echo sample,DV,DV_merfin,GATK,GATK_merfin > {output}
+        for sample in {params.samples};
+        do
+          #echo $sample,$(grep "records:" $(ls -rt logs/merfin_filter/sample-$sample.vcf-DV.fitted-raw*err | head -n 1) | awk '{{print $2}}'),$(wc -l < <(grep -v "#" merfin/$sample.DV.merfin.raw.filter.vcf)),$(grep "records:" $(ls -rt logs/merfin_filter/sample-$sample.vcf-GATK.fitted-raw*err | head -n 1) | awk '{{print $2}}'),$(wc -l < <(grep -v "#" merfin/$sample.GATK.merfin.raw.filter.vcf)) >> {output}
+          echo $sample,$(bcftools index -n merfin/$sample.DV.vcf.gz),$(bcftools index -n merfin/$sample.DV.merfin.raw.filter.vcf.gz),$(bcftools index -n merfin/$sample.GATK.vcf.gz),$(bcftools index -n merfin/$sample.GATK.merfin.raw.filter.vcf.gz)
+        done
+        '''
 
-#rule bcftools_isec:
-#    input:
-#        expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
-#    output:
-#        directory('merfin/{sample}_merfin_isec')
-#    shell:
-#        '''
-#        bcftools isec 
-#        '''
-#multiisec
+rule bcftools_isec:
+    input:
+        expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
+    output:
+        directory('merfin/{sample}_merfin_isec')
+    threads: 2
+    resources:
+        mem_mb = 4000
+    shell:
+        '''
+        bcftools isec -p {output} -Oz --threads {threads} {input}
+        '''
