@@ -3,7 +3,7 @@ from pathlib import PurePath
 rule all:
     input:
         'merfin_filtering.csv',
-        expand('merfin/{sample}_merfin.upset',sample=config['samples']),
+        expand('merfin/{sample}_merfin.intersections',sample=config['samples']),
         expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
 
 def get_fastq(sample):
@@ -147,24 +147,19 @@ rule bcftools_isec:
         vcfs = expand('merfin/{{sample}}.{vcf}.vcf.gz',vcf=config['vcfs']),
         filtered = expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
     output:
-        temp(directory('merfin/{sample}_merfin_isec'))
+        'merfin/{sample}_merfin.intersections'
+    params:
+        lambda wildcards, input: len(input)
     threads: 2
     resources:
-        mem_mb = 4000
+        mem_mb = 4000,
+        disk_scratch = 10
     shell:
         '''
-        bcftools isec -p {output} -Oz --threads {threads} {input}
-        '''
-
-rule upset_format:
-    input:
-        'merfin/{sample}_merfin_isec'
-    output:
-        'merfin/{sample}_merfin.upset'
-    shell:
-        '''
-        for i in {input}/*gz;
-        do
-          echo -n "$(bcftools index -n $i)," >> {output}
+        for i in {{1..{params}}}
+        do	
+          bcftools isec -p $TMPDIR/isec -w 1 -n=$i --threads {threads} {input}
+          cut -f 5 $TMPDIR/isec/sites.txt | sort | uniq -c >> {output}
+          rm -rf $TMPDIR/isec
         done
         '''
