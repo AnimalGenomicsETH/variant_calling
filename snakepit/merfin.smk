@@ -159,7 +159,7 @@ rule bcftools_isec:
         for i in {{1..{params}}}
         do	
           bcftools isec -p $TMPDIR/isec -w 1 -n=$i --threads {threads} {input}
-          cut -f 5 $TMPDIR/isec/sites.txt | sort | uniq -c >> {output}
+          awk '{{print $5,(length($3)+length($4))==2}}' $TMPDIR/isec/sites.txt | sort -k1,1 | uniq -c >> {output}          
           rm -rf $TMPDIR/isec
         done
         '''
