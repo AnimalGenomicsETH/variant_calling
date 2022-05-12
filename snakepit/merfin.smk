@@ -36,7 +36,7 @@ rule meryl_filter:
 
 rule meryl_count_asm:
     output:
-        directory('readmers/ARS.seqmers.meryl')
+        temp(directory('readmers/ARS.seqmers.meryl'))
     threads: 6
     resources:
         mem_mb = 3500
@@ -49,7 +49,7 @@ rule meryl_print_histogram:
     input:
         'readmers/{sample}.readmers.SR.meryl'
     output:
-        'readmers/{sample}.hist'
+        temp('readmers/{sample}.hist')
     shell:
         '/cluster/work/pausch/alex/software/MERFIN_NEW/build/bin/meryl histogram {input} > {output}'
 
@@ -57,8 +57,8 @@ rule merfin_lookup:
     input:
         'readmers/{sample}.hist'
     output:
-        'readmers/{sample}/lookup_table.txt',
-        'readmers/{sample}/model.txt'
+        temp('readmers/{sample}/lookup_table.txt'),
+        temp('readmers/{sample}/model.txt')
     params:
         out = lambda wildcards, output: PurePath(output[0]).parent
     envmodules:
@@ -97,14 +97,14 @@ rule merfin_filter:
         lookup = lambda wildcards: 'readmers/{sample}/lookup_table.txt' if wildcards.fitted == 'fitted' else [],
         model = lambda wildcards: 'readmers/{sample}/model.txt' if wildcards.fitted == 'fitted' else []
     output:
-        'merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf'
+        temp('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf')
     params:
         out = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix(''),
         fitted = lambda wildcards, input: merfin_fitting(wildcards,input.lookup,input.model)
-    threads: 8
+    threads: 10
     resources:
         mem_mb = 5000,
-        walltime = '24:00'
+        walltime = '4:00'
     shell:
         '''
         /cluster/work/pausch/alex/software/MERFIN_NEW/build/bin/merfin -filter -sequence {config[reference]} -seqmers {input.seqmers} {params.fitted} -readmers {input.readmers} -threads {threads} -vcf {input.vcf} -output {params.out}
@@ -114,7 +114,7 @@ rule bcftools_sort:
     input:
         'merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf'
     output:
-        'merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz'
+        temp('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz')
     resources:
         mem_mb = 2000,
         disk_scratch = 10
@@ -148,18 +148,10 @@ rule bcftools_isec:
         filtered = expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
     output:
         'merfin/{sample}_merfin.intersections'
-    params:
-        lambda wildcards, input: len(input)
-    threads: 2
+    threads: 4
     resources:
-        mem_mb = 4000,
-        disk_scratch = 10
+        mem_mb = 2000
     shell:
         '''
-        for i in {{1..{params}}}
-        do	
-          bcftools isec -p $TMPDIR/isec -w 1 -n=$i --threads {threads} {input}
-          awk '{{print $5,(length($3)+length($4))==2}}' $TMPDIR/isec/sites.txt | sort -k1,1 | uniq -c >> {output}          
-          rm -rf $TMPDIR/isec
-        done
+	bcftools isec --threads {threads} {input} | awk '{{print $5,(length($3)+length($4))==2}}' | sort -k1,1 | uniq -c >> {output}
         '''
