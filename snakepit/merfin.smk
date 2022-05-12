@@ -1,4 +1,5 @@
 from pathlib import PurePath
+from itertools import product
 
 rule all:
     input:
@@ -63,7 +64,7 @@ rule merfin_lookup:
         out = lambda wildcards, output: PurePath(output[0]).parent
     envmodules:
         'gcc/8.2.0',
-        'r/4.0.2'
+        'r/4.1.3'
     shell:
         'Rscript /cluster/work/pausch/alex/software/genomescope2.0/genomescope.R -i {input} -k 21 -o {params.out} --fitted_hist -p 2'
 
@@ -117,7 +118,7 @@ rule bcftools_sort:
         temp('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz')
     resources:
         mem_mb = 2000,
-        disk_scratch = 10
+        disk_scratch = 2
     shell:
         '''
         bcftools sort -T $TMPDIR -o {output} {input}
@@ -131,14 +132,27 @@ rule tabulate_results:
     output:
         'merfin_filtering.csv'
     params:
-        samples = config['samples']
+        N_samples = len(config['samples'])-1,
+        MAX_V = len(config['vcfs'])-1,
+        MAX_M = len(list(product(config['vcfs'],config['modes'])))-1,
+        orders = ','.join(list(config['vcfs'])+[f'{V}_{F}' for V,F in product(config['vcfs'],config['modes'])])
     shell:
         '''
-        echo sample,DV,DV_merfin,GATK,GATK_merfin > {output}
-        for sample in {params.samples};
+        echo {params.orders} > {output}
+        vcf=({input.vcfs})
+        merfins=({input.merfins})
+        for s in {{0..{params.N_samples}}}
         do
-          #echo $sample,$(grep "records:" $(ls -rt logs/merfin_filter/sample-$sample.vcf-DV.fitted-raw*err | head -n 1) | awk '{{print $2}}'),$(wc -l < <(grep -v "#" merfin/$sample.DV.merfin.raw.filter.vcf)),$(grep "records:" $(ls -rt logs/merfin_filter/sample-$sample.vcf-GATK.fitted-raw*err | head -n 1) | awk '{{print $2}}'),$(wc -l < <(grep -v "#" merfin/$sample.GATK.merfin.raw.filter.vcf)) >> {output}
-          echo $sample,$(bcftools index -n merfin/$sample.DV.vcf.gz),$(bcftools index -n merfin/$sample.DV.merfin.raw.filter.vcf.gz),$(bcftools index -n merfin/$sample.GATK.vcf.gz),$(bcftools index -n merfin/$sample.GATK.merfin.raw.filter.vcf.gz)
+          for X in {{0..{params.MAX_V}}}
+          do
+            echo -n ${{vcf[$((s*({params.MAX_V}+1) + X))]}}, >> {output}
+          done
+          for Y in {{0..{params.MAX_M}}}
+          do
+            echo -n ${{merfins[$((s*({params.MAX_M}+1) + Y))]}}, >> {output}
+          done
+          echo >> {output}
+        sed -i 's/,$//g' {output}
         done
         '''
 
