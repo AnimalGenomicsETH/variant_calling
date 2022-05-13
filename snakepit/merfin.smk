@@ -1,8 +1,11 @@
 from pathlib import PurePath
 from itertools import product
 
+localrules: tabulate_isec
+
 rule all:
     input:
+        'merfin_isec.upset',
         'merfin_filtering.csv',
         expand('merfin/{sample}_merfin.intersections',sample=config['samples']),
         expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
@@ -77,7 +80,7 @@ rule bcftools_extract:
         mem_mb = 4000
     shell:
          '''
-         bcftools view -s {wildcards.sample} {input.vcf} | bcftools view -i 'GT[*]="alt"' | bcftools norm -m -any -f {config[reference]} -o {output}
+         bcftools view -s {wildcards.sample} {input.vcf} | bcftools norm -m -any -f {config[reference]} | bcftools view -i 'GT[*]="alt"' -o {output}
          tabix -fp vcf {output}
          '''
 
@@ -167,8 +170,21 @@ rule bcftools_isec:
         'merfin/{sample}_merfin.intersections'
     threads: 4
     resources:
-        mem_mb = 2000
+        mem_mb = 1000,
+        walltime = '60'
     shell:
         '''
-	bcftools isec --threads {threads} {input} | awk '{{print $5,(length($3)+length($4))==2}}' | sort -k1,1 | uniq -c >> {output}
+	    bcftools isec --threads {threads} {input} | awk '{{print $5,(length($3)+length($4))==2}}' | sort -k1,1 | uniq -c | awk '{{print $0" {wildcards.sample}"}}' > {output}
+        '''
+
+rule tabulate_isec:
+    input:
+        expand('merfin/{sample}_merfin.intersections',sample=config['samples'])
+    output:
+        'merfin_isec.upset'
+    params:
+        samples = list(config['samples'].keys())
+    shell:
+        '''
+        cat {input} > {output}
         '''
