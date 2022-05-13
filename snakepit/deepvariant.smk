@@ -84,7 +84,7 @@ rule all:
     input:
         capture_logic()
 
-CHROMOSOMES = list(range(1,config.get('chromosomes',32))) + ['X','0']
+CHROMOSOMES = list(map(str,range(1,config.get('autosomes',30)))) + config.get('special_chromosomes',[])
 
 def get_regions(wildcards):
     if config.get('regions','all') == 'all':
@@ -210,10 +210,12 @@ rule split_gvcf_chromosomes:
         mem_mb = 4000,
         walltime = '4:00'
     run:
+        placed_chromosomes = '|'.join(CHROMOSOMES + config.get('ignore_chromosomes',[]))
         for idx, chromosome in enumerate(CHROMOSOMES):
             out_file = output.gvcf[idx]
             if chromosome == '0': #catch all unplaced contigs INCLUDING MT contig
-                chromosome = f'$(tabix -l {{input}} | tail -n +{len(CHROMOSOMES)})' #HARDCODED FOR ARS
+                chromosome = f'$(tabix -l {{input}} | grep -wvE {placed_chromosomes})'
+                #chromosome = f'$(tabix -l {{input}} | tail -n +{len(CHROMOSOMES)})' #HARDCODED FOR ARS
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
 
@@ -223,7 +225,7 @@ def get_GL_config(preset):
     elif preset == 'Unfiltered':
         return 'DeepVariant_unfiltered'
     elif 'GL_config' in config:
-        return config['GL_config']
+        return '/data/' + config['GL_config']
     else:
         raise ValueError(f'Unknown config {preset=}')
 
