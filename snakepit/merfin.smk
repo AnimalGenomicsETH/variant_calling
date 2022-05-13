@@ -77,7 +77,7 @@ rule bcftools_extract:
         mem_mb = 4000
     shell:
          '''
-         bcftools view -s {wildcards.sample} {input.vcf} | bcftools view -i 'GT[*]="alt"' | bcftools norm -m- any -f {config[reference]} -o {output} 
+         bcftools view -s {wildcards.sample} {input.vcf} | bcftools view -i 'GT[*]="alt"' | bcftools norm -m -any -f {config[reference]} -o {output}
          tabix -fp vcf {output}
          '''
 
@@ -132,24 +132,27 @@ rule tabulate_results:
     output:
         'merfin_filtering.csv'
     params:
+        samples = list(config['samples'].keys()),
         N_samples = len(config['samples'])-1,
         MAX_V = len(config['vcfs'])-1,
         MAX_M = len(list(product(config['vcfs'],config['modes'])))-1,
         orders = ','.join(list(config['vcfs'])+[f'{V}_{F}' for V,F in product(config['vcfs'],config['modes'])])
     shell:
         '''
-        echo {params.orders} > {output}
+        echo sample,{params.orders} > {output}
         vcf=({input.vcfs})
         merfins=({input.merfins})
+        samples=({params.samples})
         for s in {{0..{params.N_samples}}}
         do
+          echo -n ${{samples[$s]}}, >> {output}
           for X in {{0..{params.MAX_V}}}
           do
-            echo -n ${{vcf[$((s*({params.MAX_V}+1) + X))]}}, >> {output}
+            echo -n $(bcftools index -n ${{vcf[$((s*({params.MAX_V}+1) + X))]}}), >> {output}
           done
           for Y in {{0..{params.MAX_M}}}
           do
-            echo -n ${{merfins[$((s*({params.MAX_M}+1) + Y))]}}, >> {output}
+            echo -n $(bcftools index -n ${{merfins[$((s*({params.MAX_M}+1) + Y))]}}), >> {output}
           done
           echo >> {output}
         sed -i 's/,$//g' {output}
