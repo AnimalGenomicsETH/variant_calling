@@ -133,7 +133,10 @@ rule tabulate_results:
         vcfs = expand('vcfs/{sample}.{vcf}.vcf.gz',sample=config['samples'],vcf=config['vcfs']),
         merfins = expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
     output:
-        'merfin_filtering.csv'
+        filtering = 'merfin_filtering.csv',
+        genotypes = 'merfin_genotypes.csv'
+    resources:
+        mem_mb = 2000
     params:
         samples = list(config['samples'].keys()),
         N_samples = len(config['samples'])-1,
@@ -142,23 +145,26 @@ rule tabulate_results:
         orders = ','.join(list(config['vcfs'])+[f'{V}_{F}' for V,F in product(config['vcfs'],config['modes'])])
     shell:
         '''
-        echo sample,{params.orders} > {output}
+        echo sample,{params.orders} > {output.filtering}
+        echo sample,GT,count > {output.genotypes}
         vcf=({input.vcfs})
         merfins=({input.merfins})
         samples=({params.samples})
         for s in {{0..{params.N_samples}}}
         do
-          echo -n ${{samples[$s]}}, >> {output}
+          echo -n ${{samples[$s]}}, >> {output.filtering}
           for X in {{0..{params.MAX_V}}}
           do
-            echo -n $(bcftools index -n ${{vcf[$((s*({params.MAX_V}+1) + X))]}}), >> {output}
+            echo -n $(bcftools index -n ${{vcf[$((s*({params.MAX_V}+1) + X))]}}), >> {output.filtering}
+            bcftools query -f '[%GT]\n' ${{vcf[$((s*({params.MAX_V}+1) + X))]}} | sed -E 's/(1\|0|1\/0|1\|0|0\|1)/0\/1/g' | sed -E 's/1\|1/1\/1/g' | sort | uniq -c | awk -v S=${{vcf[$((s*({params.MAX_V}+1) + X))]}} '{{print S","$2","$1}}' >> {output.genotypes}
           done
           for Y in {{0..{params.MAX_M}}}
           do
-            echo -n $(bcftools index -n ${{merfins[$((s*({params.MAX_M}+1) + Y))]}}), >> {output}
+            echo -n $(bcftools index -n ${{merfins[$((s*({params.MAX_M}+1) + Y))]}}), >> {output.filtering}
+            bcftools query -f '[%GT]\n' ${{merfins[$((s*({params.MAX_M}+1) + Y))]}} | sed -E 's/(1\|0|1\/0|1\|0|0\|1)/0\/1/g' | sed -E 's/1\|1/1\/1/g' | sort | uniq -c | awk -v S=${{merfins[$((s*({params.MAX_M}+1) + Y))]}} '{{print S","$2","$1}}' >> {output.genotypes}
           done
           echo >> {output}
-        sed -i 's/,$//g' {output}
+        sed -i 's/,$//g' {output.filtering}
         done
         '''
 
