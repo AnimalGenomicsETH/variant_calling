@@ -52,10 +52,10 @@ def get_model(wildcards,base='/opt/models',ext='model.ckpt'):
     elif wildcards['model'] == 'bwa':
         return model_location.format('wgs')
     elif wildcards['model'] == 'mm2':
-        return model_location.format('wgs')
+        return model_location.format('pacbio')
 
 
-def make_singularity_call(wildcards,extra_args='',tmp_bind='$TMPDIR',input_bind=True, output_bind=True, work_bind=True):
+def make_singularity_call(wildcards,extra_args='',tmp_bind='$TMPDIR',input_bind=False, output_bind=False, work_bind=False):
     call = f'singularity exec {extra_args} '
     if input_bind:
         call += f'-B {":/".join([get_dir("input",**wildcards)]*2)} '
@@ -65,6 +65,7 @@ def make_singularity_call(wildcards,extra_args='',tmp_bind='$TMPDIR',input_bind=
         call += f'-B {":/".join([get_dir("work",**wildcards)]*2)} '
     if tmp_bind:
         call += f'-B {tmp_bind}:/tmp '
+    
     return call
 
 for dir_ in ('output','work'):
@@ -94,7 +95,72 @@ def get_regions(wildcards):
     else:
         return f'--regions {wildcards.chromosome}'
 
+## DEEPVARIANT SPECIAL ARG HANDLING
+def _is_quoted(value):
+  if value.startswith('"') and value.endswith('"'):
+    return True
+  if value.startswith("'") and value.endswith("'"):
+    return True
+  return False
 
+def _add_quotes(value):
+  if isinstance(value, str) and _is_quoted(value):
+    return value
+  return '"{}"'.format(value)
+
+def _extra_args_to_dict(extra_args):
+  """Parses comma-separated list of flag_name=flag_value to dict."""
+  args_dict = {}
+  if extra_args is None:
+    return args_dict
+  for extra_arg in extra_args.split(','):
+    (flag_name, flag_value) = extra_arg.split('=')
+    flag_name = flag_name.strip('-')
+    # Check for boolean values.
+    if flag_value.lower() == 'true':
+      flag_value = True
+    elif flag_value.lower() == 'false':
+      flag_value = False
+    args_dict[flag_name] = flag_value
+  return args_dict
+
+def _extend_command_by_args_dict(command_S, extra_args):
+  """Adds `extra_args` to the command string."""
+  command = []
+  for key in sorted(extra_args):
+    value = extra_args[key]
+    if value is None:
+      continue
+    if isinstance(value, bool):
+      added_arg = '' if value else 'no'
+      added_arg += key
+      command.extend(['--' + added_arg])
+    else:
+      command.extend(['--' + key, _add_quotes(value)])
+  return command_S + ' '.join(command)
+
+def get_model_params(model):
+    special_args = {}
+    if model == 'bwa':
+        special_args['channels'] = 'insert_size'
+    elif model == 'mm2':
+        special_args['add_hp_channel'] = True
+        special_args['alt_aligned_pileup'] = 'diff_channels'
+        special_args['max_reads_per_partition'] = 600
+        special_args['min_mapping_quality'] = 1
+        special_args['parse_sam_aux_fields'] = True
+        special_args['partition_size'] = 25000
+        special_args['phase_reads'] = True
+        special_args['pileup_image_width'] = 199
+        special_args['realign_reads'] = False
+        special_args['sort_by_haplotypes'] = True
+        special_args['track_ref_reads'] = True
+        special_args['vsc_min_fraction_indels'] = 0.12
+
+    return _extend_command_by_args_dict('',special_args)
+
+
+## END DEEPVARIANT SPECIAL ARG HANDLING
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
@@ -106,11 +172,11 @@ rule deepvariant_make_examples:
     params:
         examples = lambda wildcards, output: PurePath(output['example']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        phase_args = lambda wildcards: '--parse_sam_aux_fields={i} --sort_by_haplotypes={i}'.format(i=('true' if False else 'false')),
-        model_args = lambda wildcards: '--add_hp_channel --alt_aligned_pileup diff_channels --realign_reads=false --vsc_min_fraction_indels 0.12' if 'bwa' == 'pbmm2' else '',
-        singularity_call = lambda wildcards,input: make_singularity_call(wildcards,input_bind=False,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:{PurePath(input.bam[0]).parent}'),
+        model_args = get_model_params(config['model']),
+        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,input_bind=False,output_bind=False,work_bind=False,extra_args=f'-B {PurePath(output["example"]).parent}:/{PurePath(output["example"]).parent} -B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:{PurePath(input.bam[0]).parent}'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
-        regions = lambda wildcards: get_regions(wildcards) #f'--regions "{" ".join(map(str,range(1,30)))}"' if config.get('autosomes',False) else ''
+        contain = lambda wildcards: config['DV_container'],
+        regions = lambda wildcards: get_regions(wildcards) 
     threads: 1
     resources:
         mem_mb = 6000,
@@ -119,19 +185,18 @@ rule deepvariant_make_examples:
         use_singularity = True
     priority: 75
     shell:
-        #--include_med_dp \
         '''
         {params.singularity_call} \
-        {config[DV_container]} \
+        {params.contain} \
         /opt/deepvariant/bin/make_examples \
         --mode calling \
         --ref {params.ref} \
+        --include_med_dp \
         --reads {input.bam[0]} \
         --examples {params.examples} \
         --gvcf {params.gvcf} \
         {params.regions} \
         {params.model_args} \
-        {params.phase_args} \
         --task {wildcards.N}
         '''
 
@@ -144,7 +209,7 @@ rule deepvariant_call_variants:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model = lambda wildcards: get_model({'model':'bwa'}),
         dir_ = lambda wildcards: get_dir('work',**wildcards),
-        singularity_call = lambda wildcards, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads}'),
+        singularity_call = lambda wildcards, output, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads} -B {PurePath(output[0]).parent}:/{PurePath(output[0]).parent}'),
         contain = lambda wildcards: config['DV_container'],
         vino = lambda wildcards: '--use_openvino'
     threads: 18
@@ -176,7 +241,7 @@ rule deepvariant_postprocess:
         gvcf = get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz')
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/'),
+        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/ -B {PurePath(output["vcf"]).parent}:/{PurePath(output["vcf"]).parent}'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
         contain = lambda wildcards: config['DV_container']
     threads: 1
@@ -239,10 +304,9 @@ rule GLnexus_merge_chrm:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
-        preset = lambda wildcards: get_GL_config(wildcards.preset), #'DeepVariantWGS' if wildcards.preset == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered',
-        bed = lambda wildcards: '' if True else '--bed /data/BSW_autosome.bed',
+        preset = lambda wildcards: get_GL_config(wildcards.preset),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1000
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: 12 #force using 4 threads for bgziping
     resources:
         mem_mb = 8000,
@@ -280,17 +344,17 @@ rule aggregate_autosomes:
         bcftools concat --threads {threads} -o {output[0]} -Oz {input.vcf}
         tabix -p vcf {output[0]}
         '''
+
 rule GLnexus_merge:
     input:
-        expand(get_dir('output','{animal}.bwa.all.g.vcf.gz'),animal=config['animals'])
+        expand(get_dir('output','{animal}.bwa.{{{chrs}}}.g.vcf.gz'),animal=config['animals'])
     output:
-        multiext(get_dir('main','cohort.all.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','cohort.{chrs,all|autosomes}.{preset}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
-        bed = lambda wildcards: '' if False else '--bed /data/BSW_autosome.bed',
-        preset = lambda wildcards: get_GL_config(wildcards.preset), #lambda wildcards: 'DeepVariantWGS' if wildcards.FILT == 'WGS' else '/data/deepvariant_raw.yml', #'DeepVariant_unfiltered', #'/data/deep.yml', 
+        preset = lambda wildcards: get_GL_config(wildcards.preset),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: 12 #force using threads for bgziping
@@ -310,7 +374,7 @@ rule GLnexus_merge:
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {params.bed} {params.gvcfs} \
-        | bcftools view - | bgzip -@ {threads} -c > {params.out}"
+        | bcftools view - | bgzip -@ 4 -c > {params.out}"
         tabix -p vcf {output[0]}
         '''
 
