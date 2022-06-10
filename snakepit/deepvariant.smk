@@ -43,15 +43,15 @@ wildcard_constraints:
     caller = r'DV|GATK',
     chr = r'\d*|all|autosomes'
     
-def get_model(wildcards,base='/opt/models',ext='model.ckpt'):
+def get_model(model,base='/opt/models',ext='model.ckpt'):
     model_location = f'{base}/{{}}/{ext}'
-    if wildcards['model'] == 'pbmm2':
+    if model == 'pbmm2':
         return model_location.format('pacbio')
-    elif wildcards['model'] == 'hybrid':
+    elif model == 'hybrid':
         return model_location.format('hybrid_pacbio_illumina')
-    elif wildcards['model'] == 'bwa':
+    elif model == 'bwa':
         return model_location.format('wgs')
-    elif wildcards['model'] == 'mm2':
+    elif model == 'mm2':
         return model_location.format('pacbio')
 
 
@@ -173,7 +173,7 @@ rule deepvariant_make_examples:
         examples = lambda wildcards, output: PurePath(output['example']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model_args = get_model_params(config['model']),
-        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,input_bind=False,output_bind=False,work_bind=False,extra_args=f'-B {PurePath(output["example"]).parent}:/{PurePath(output["example"]).parent} -B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:{PurePath(input.bam[0]).parent}'),
+        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,input_bind=False,output_bind=False,work_bind=False,extra_args=f'-B {PurePath(output["example"]).parent}:/{PurePath(output["example"]).parent} -B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:/{PurePath(input.bam[0]).parent}'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
         contain = lambda wildcards: config['DV_container'],
         regions = lambda wildcards: get_regions(wildcards) 
@@ -207,11 +207,11 @@ rule deepvariant_call_variants:
         temp(get_dir('work','call_variants_output.{chromosome}.tfrecord.gz'))
     params:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        model = lambda wildcards: get_model({'model':'bwa'}),
+        model = get_model(config['model']),
         dir_ = lambda wildcards: get_dir('work',**wildcards),
         singularity_call = lambda wildcards, output, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads} -B {PurePath(output[0]).parent}:/{PurePath(output[0]).parent}'),
         contain = lambda wildcards: config['DV_container'],
-        vino = lambda wildcards: '--use_openvino'
+        vino = '--use_openvino --openvino_model_dir /tmp' if config.get('openvino',False) else ''
     threads: 18
     resources:
         mem_mb = 3000,
@@ -224,11 +224,11 @@ rule deepvariant_call_variants:
         '''
         {params.singularity_call} \
         {params.contain} \
-        /bin/bash -c "cd /tmp; /opt/deepvariant/bin/call_variants \
+        /opt/deepvariant/bin/call_variants \
         --outfile /{output} \
         --examples /{params.examples} \
         --checkpoint {params.model} \
-        {params.vino}"
+        {params.vino}
         '''
 
 rule deepvariant_postprocess:
