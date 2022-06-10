@@ -183,7 +183,7 @@ rule deepvariant_make_examples:
         walltime = get_walltime,
         disk_scratch = 1,
         use_singularity = True
-    priority: 75
+    priority: 50
     shell:
         '''
         {params.singularity_call} \
@@ -219,7 +219,7 @@ rule deepvariant_call_variants:
         use_singularity = True,
         walltime = '24:00' #get_walltime,
         #use_AVX512 = True
-    priority: 100
+    priority: 90
     shell:
         '''
         {params.singularity_call} \
@@ -274,6 +274,7 @@ rule split_gvcf_chromosomes:
     resources:
         mem_mb = 4000,
         walltime = '4:00'
+    priority: 10
     run:
         placed_chromosomes = '|'.join(CHROMOSOMES + config.get('ignore_chromosomes',[]))
         for idx, chromosome in enumerate(CHROMOSOMES):
