@@ -180,7 +180,7 @@ rule deepvariant_make_examples:
     threads: 1
     resources:
         mem_mb = 6000,
-        walltime = get_walltime,
+        walltime = '24:00',#get_walltime,
         disk_scratch = 1,
         use_singularity = True
     priority: 50
@@ -307,7 +307,8 @@ rule GLnexus_merge_chrm:
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         preset = lambda wildcards: get_GL_config(wildcards.preset),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024,
+        container = config['GL_container']
     threads: 12 #force using 4 threads for bgziping
     resources:
         mem_mb = 8000,
@@ -319,13 +320,13 @@ rule GLnexus_merge_chrm:
         '''
         ulimit -Sn 4096
         {params.singularity_call} \
-        {config[GL_container]} \
+        {params.container} \
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
         --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
-        {params.bed} {params.gvcfs} \
+        {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
         tabix -p vcf {output[0]}
         '''
@@ -357,7 +358,8 @@ rule GLnexus_merge:
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         preset = lambda wildcards: get_GL_config(wildcards.preset),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024,
+        container = config['GL_container']
     threads: 12 #force using threads for bgziping
     resources:
         mem_mb = 4000,
@@ -368,13 +370,13 @@ rule GLnexus_merge:
         '''
         ulimit -Sn 4096
         {params.singularity_call} \
-        {config[GL_container]} \
+        {params.container} \
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
         --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
-        {params.bed} {params.gvcfs} \
+        {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
         tabix -p vcf {output[0]}
         '''
