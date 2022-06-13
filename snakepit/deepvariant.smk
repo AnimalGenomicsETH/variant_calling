@@ -186,6 +186,7 @@ rule deepvariant_make_examples:
     priority: 50
     shell:
         '''
+        #--sample_name {wildcards.animal}
         {params.singularity_call} \
         {params.contain} \
         /opt/deepvariant/bin/make_examples \
@@ -328,7 +329,7 @@ rule GLnexus_merge_chrm:
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
-        tabix -p vcf {output[0]}
+        tabix -p vcf {params.out}
         '''
 
 rule aggregate_autosomes:
@@ -362,7 +363,7 @@ rule GLnexus_merge:
         container = config['GL_container']
     threads: 12 #force using threads for bgziping
     resources:
-        mem_mb = 4000,
+        mem_mb = 6000,
         disk_scratch = 50,
         walltime = "4:00",
         use_singularity = True
@@ -378,7 +379,7 @@ rule GLnexus_merge:
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
-        tabix -p vcf {output[0]}
+        tabix -p vcf {params.out}
         '''
 
 rule beagle_phase:
