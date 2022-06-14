@@ -303,8 +303,8 @@ rule GLnexus_merge_chrm:
     output:
         multiext(get_dir('main','cohort.{chr,\d+|X|Y}.{preset}.vcf.gz'),'','.tbi')
     params:
-        gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input.vcf),
-        out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
+        gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input.vcf),
+        out = lambda wildcards, output: '/data' / PurePath(output[0]),
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         preset = lambda wildcards: get_GL_config(wildcards.preset),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
@@ -329,7 +329,7 @@ rule GLnexus_merge_chrm:
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
-        tabix -p vcf {params.out}
+        tabix -p vcf {output[0]}
         '''
 
 rule aggregate_autosomes:
@@ -354,8 +354,8 @@ rule GLnexus_merge:
     output:
         multiext(get_dir('main','cohort.{chrs,all|autosomes}.{preset}.vcf.gz'),'','.tbi')
     params:
-        gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
-        out = lambda wildcards, output: f'/data/{PurePath(output[0]).name}',
+        gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input),
+        out = lambda wildcards, output: '/data' / PurePath(output[0]),
         DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         preset = lambda wildcards: get_GL_config(wildcards.preset),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
@@ -379,7 +379,7 @@ rule GLnexus_merge:
         --mem-gbytes {params.mem} \
         {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
-        tabix -p vcf {params.out}
+        tabix -p vcf {output[0]}
         '''
 
 rule beagle_phase:
