@@ -77,7 +77,7 @@ def capture_logic():
     if 'trios' in config:
         return [get_dir('main','mendel.{caller}.autosomes.summary.df',caller=caller) for caller in ('DV','GATK')]
     elif config.get('regions') == 'autosomes':
-        return [get_dir('main','cohort.autosomes.WGS.vcf.gz')]
+        return [get_dir('main',f'cohort.autosomes.{config.get("GL_config","WGS")}.vcf.gz')]
     else:
         return [get_dir('main','cohort.all.WGS.vcf.gz')]
 
@@ -173,20 +173,19 @@ rule deepvariant_make_examples:
         examples = lambda wildcards, output: PurePath(output['example']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model_args = get_model_params(config['model']),
-        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,input_bind=False,output_bind=False,work_bind=False,extra_args=f'-B {PurePath(output["example"]).parent}:/{PurePath(output["example"]).parent} -B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:/{PurePath(input.bam[0]).parent}'),
+        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,input_bind=False,output_bind=True,work_bind=False,extra_args=f'-B {PurePath(output["example"]).parent}:/{PurePath(output["example"]).parent} -B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:{PurePath(input.bam[0]).parent}'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
         contain = lambda wildcards: config['DV_container'],
         regions = lambda wildcards: get_regions(wildcards) 
     threads: 1
     resources:
         mem_mb = 6000,
-        walltime = '24:00',#get_walltime,
+        walltime = '4:00',#get_walltime,
         disk_scratch = 1,
         use_singularity = True
     priority: 50
     shell:
         '''
-        #--sample_name {wildcards.animal}
         {params.singularity_call} \
         {params.contain} \
         /opt/deepvariant/bin/make_examples \
@@ -196,6 +195,7 @@ rule deepvariant_make_examples:
         --reads {input.bam[0]} \
         --examples {params.examples} \
         --gvcf {params.gvcf} \
+        --sample_name {wildcards.animal} \
         {params.regions} \
         {params.model_args} \
         --task {wildcards.N}
@@ -213,9 +213,9 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, output, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads} -B {PurePath(output[0]).parent}:/{PurePath(output[0]).parent}'),
         contain = lambda wildcards: config['DV_container'],
         vino = '--use_openvino --openvino_model_dir /tmp' if config.get('openvino',False) else ''
-    threads: 18
+    threads: 12
     resources:
-        mem_mb = 3000,
+        mem_mb = 1500,
         disk_scratch = 1,
         use_singularity = True,
         walltime = '24:00' #get_walltime,
@@ -247,7 +247,7 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 50000,
+        mem_mb = 40000,
         walltime = get_walltime,
         disk_scratch = 1,
         use_singularity = True
@@ -282,9 +282,14 @@ rule split_gvcf_chromosomes:
             out_file = output.gvcf[idx]
             if chromosome == '0': #catch all unplaced contigs INCLUDING MT contig
                 chromosome = f'$(tabix -l {{input}} | grep -wvE {placed_chromosomes})'
-                #chromosome = f'$(tabix -l {{input}} | tail -n +{len(CHROMOSOMES)})' #HARDCODED FOR ARS
             shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
             shell(f'tabix -p vcf {out_file}')
+
+#'''
+#params:
+#    unplaced = '-x unplaced.vvcf
+#bcftools +scatter {input} --threads {threads} -s {params.scatter} {params.unplaced} -Oz -o
+#'''
 
 def get_GL_config(preset):
     if preset == 'WGS':
@@ -335,7 +340,7 @@ rule GLnexus_merge_chrm:
 rule aggregate_autosomes:
     input:
         vcf = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz',CHR=CHR) for CHR in CHROMOSOMES),
-        tbi = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz.tbi',CHR=CHR) for CHR in CHROMOSOMES),
+        tbi = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz.tbi',CHR=CHR) for CHR in CHROMOSOMES)
     output:
         multiext(get_dir('main','cohort.autosomes.{preset}.vcf.gz'),'','.tbi')
     threads: 12
@@ -380,35 +385,4 @@ rule GLnexus_merge:
         {params.gvcfs} \
         | bcftools view - | bgzip -@ 4 -c > {params.out}"
         tabix -p vcf {output[0]}
-        '''
-
-rule beagle_phase:
-    input:
-        get_dir('main','cohort.{chr}.vcf.gz')
-    output:
-        get_dir('main','cohort.{chr,\d+|X|Y}.beagle.vcf.gz')
-    threads: 8
-    resources:
-        mem_mb = 6000
-    params:
-        mem = lambda wilcards, resources, threads: int(threads*resources.mem_mb/1000),
-        out = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix(''),
-        ne = 200,
-        window = 60 #cM
-    shell:
-        '''
-        java -Xmx{params.mem}g -jar /cluster/work/pausch/alex/software/beagle.08Feb22.fa4.jar gt={input} out={params.out} nthreads={threads} window={params.window} ne={params.ne}
-        '''
-
-rule bcftools_stats:
-    input:
-        get_dir('main','cohort.{chr}.beagle.vcf.gz')
-    output:
-        get_dir('main','cohort.{chr,\d+|X|Y}.beagle.stats')
-    resources:
-        mem_mb = 5000
-    shell:
-        '''
-        tabix -fp vcf {input}
-        bcftools stats {input} > {output}
         '''
