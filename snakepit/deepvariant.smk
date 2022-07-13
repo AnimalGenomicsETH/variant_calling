@@ -10,6 +10,8 @@ def get_dir(base='work',ext='', **kwargs):
         base_dir = config.get('bam_path','')
     elif base == 'output':
         base_dir = 'output_DV'
+    elif base == 'splits':
+        base_dir = 'split_files'
     elif base == 'work':
         base_dir = get_dir('output','intermediate_results_{animal}',**kwargs)
     elif base == 'mendel':
@@ -30,9 +32,9 @@ else:
 
 
 if config.get("merging","all") == "all":
-    ruleorder: GLnexus_merge > aggregate_autosomes
+    ruleorder: GLnexus_merge > aggregate_chromosomes
 else:
-    ruleorder: aggregate_autosomes > GLnexus_merge
+    ruleorder: aggregate_chromosomes > GLnexus_merge
 
 #include: 'mendelian.smk'
 
@@ -41,7 +43,8 @@ wildcard_constraints:
     phase = r'unphased|phased',
     model = r'pbmm2|hybrid|bwa|mm2',
     caller = r'DV|GATK',
-    chr = r'\d*|all|autosomes'
+    #chr = r'\d*|all|chromosomes',
+    cohort = r'\w+'
     
 def get_model(model,base='/opt/models',ext='model.ckpt'):
     model_location = f'{base}/{{}}/{ext}'
@@ -75,11 +78,11 @@ for dir_ in ('output','work'):
 
 def capture_logic():
     if 'trios' in config:
-        return [get_dir('main','mendel.{caller}.autosomes.summary.df',caller=caller) for caller in ('DV','GATK')]
-    elif config.get('regions') == 'autosomes':
-        return [get_dir('main',f'cohort.autosomes.{config.get("GL_config","WGS")}.vcf.gz')]
+        return [get_dir('main','mendel.{caller}.chromosomes.summary.df',caller=caller) for caller in ('DV','GATK')]
+    #elif config.get('regions') == 'chromosomes':
+    #    return [get_dir('main',f'{config.get("cohort","cohort")}.chromosomes.{config.get("GL_config","WGS")}.vcf.gz')]
     else:
-        return [get_dir('main','cohort.all.WGS.vcf.gz')]
+        return [get_dir('main',f'{config.get("cohort","cohort")}.{config.get("regions","all")}.{str(PurePath(config.get("GL_config","WGS")).with_suffix(""))}.vcf.gz')]
 
 rule all:
     input:
@@ -90,7 +93,7 @@ CHROMOSOMES = list(map(str,range(1,config.get('autosomes',30)))) + config.get('s
 def get_regions(wildcards):
     if config.get('regions','all') == 'all':
         return ''
-    elif config.get('regions',False) == 'autosomes':
+    elif config.get('regions',False) == 'chromosomes':
         return f'--regions "{" ".join(map(str,CHROMOSOMES))}"'
     else:
         return f'--regions {wildcards.chromosome}'
@@ -213,12 +216,12 @@ rule deepvariant_call_variants:
         singularity_call = lambda wildcards, output, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads} -B {PurePath(output[0]).parent}:/{PurePath(output[0]).parent}'),
         contain = lambda wildcards: config['DV_container'],
         vino = '--use_openvino --openvino_model_dir /tmp' if config.get('openvino',False) else ''
-    threads: 12
+    threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
-        mem_mb = 1500,
+        mem_mb = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
         disk_scratch = 1,
         use_singularity = True,
-        walltime = '24:00' #get_walltime,
+        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','4:00') #get_walltime,
         #use_AVX512 = True
     priority: 90
     shell:
@@ -238,8 +241,8 @@ rule deepvariant_postprocess:
         variants = get_dir('work','call_variants_output.{chromosome}.tfrecord.gz'),
         gvcf = (get_dir('work', f'gvcf.{{chromosome}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
     output:
-        vcf = get_dir('output','{animal}.bwa.{chromosome}.vcf.gz'),
-        gvcf = get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz')
+        vcf = get_dir('splits','{animal}.bwa.{chromosome}.vcf.gz'),
+        gvcf = get_dir('splits','{animal}.bwa.{chromosome}.g.vcf.gz')
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/ -B {PurePath(output["vcf"]).parent}:/{PurePath(output["vcf"]).parent}'),
@@ -247,8 +250,8 @@ rule deepvariant_postprocess:
         contain = lambda wildcards: config['DV_container']
     threads: 1
     resources:
-        mem_mb = 40000,
-        walltime = get_walltime,
+        mem_mb = config.get('resources',{}).get('postprocess',{}).get('mem_mb',40000),
+        walltime = config.get('resources',{}).get('postprocess',{}).get('walltime','4:00'),#get_walltime,
         disk_scratch = 1,
         use_singularity = True
     priority: 100
@@ -269,8 +272,8 @@ rule split_gvcf_chromosomes:
     input:
         get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz',chromosome = config.get('regions','all'))
     output:
-        gvcf = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in CHROMOSOMES)),
-        tbi = temp((get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in CHROMOSOMES))
+        gvcf = temp((get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in CHROMOSOMES)),
+        tbi = temp((get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in CHROMOSOMES))
     threads: 1
     resources:
         mem_mb = 4000,
@@ -303,10 +306,10 @@ def get_GL_config(preset):
 
 rule GLnexus_merge_chrm:
     input:
-        vcf = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
-        tbi = (get_dir('output','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
+        vcf = (get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
+        tbi = (get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        multiext(get_dir('main','cohort.{chr,\d+|X|Y}.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','{cohort}.{chr,\d+|X|Y}.{preset}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
@@ -337,12 +340,12 @@ rule GLnexus_merge_chrm:
         tabix -p vcf {output[0]}
         '''
 
-rule aggregate_autosomes:
+rule aggregate_chromosomes:
     input:
-        vcf = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz',CHR=CHR) for CHR in CHROMOSOMES),
-        tbi = (get_dir('main','cohort.{CHR}.{preset}.vcf.gz.tbi',CHR=CHR) for CHR in CHROMOSOMES)
+        vcf = (get_dir('main','{cohort}.{CHR}.{preset}.vcf.gz',CHR=CHR) for CHR in CHROMOSOMES),
+        tbi = (get_dir('main','{cohort}.{CHR}.{preset}.vcf.gz.tbi',CHR=CHR) for CHR in CHROMOSOMES)
     output:
-        multiext(get_dir('main','cohort.autosomes.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','{cohort}.chromosomes.{preset}.vcf.gz'),'','.tbi')
     threads: 12
     resources:
         mem_mb = 2000,
@@ -355,9 +358,9 @@ rule aggregate_autosomes:
 
 rule GLnexus_merge:
     input:
-        expand(get_dir('output','{animal}.bwa.{{{chrs}}}.g.vcf.gz'),animal=config['animals'])
+        expand(get_dir('splits','{animal}.bwa.{{{chrs}}}.g.vcf.gz'),animal=config['animals'])
     output:
-        multiext(get_dir('main','cohort.{chrs,all|autosomes}.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','{cohort}.{chrs}.{preset}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
