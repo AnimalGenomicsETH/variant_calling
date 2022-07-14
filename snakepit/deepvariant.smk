@@ -43,7 +43,7 @@ wildcard_constraints:
     phase = r'unphased|phased',
     model = r'pbmm2|hybrid|bwa|mm2',
     caller = r'DV|GATK',
-    #chr = r'\d*|all|chromosomes',
+    chrom = r'\d+|all|chromosomes',
     cohort = r'\w+'
     
 def get_model(model,base='/opt/models',ext='model.ckpt'):
@@ -238,11 +238,11 @@ rule deepvariant_call_variants:
 rule deepvariant_postprocess:
     input:
         ref = multiext(config['reference'],'','.fai'),
-        variants = get_dir('work','call_variants_output.{chromosome}.tfrecord.gz'),
-        gvcf = (get_dir('work', f'gvcf.{{chromosome}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
+        variants = get_dir('work','call_variants_output.{chrom}.tfrecord.gz'),
+        gvcf = (get_dir('work', f'gvcf.{{chrom}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
     output:
-        vcf = get_dir('splits','{animal}.bwa.{chromosome}.vcf.gz'),
-        gvcf = get_dir('splits','{animal}.bwa.{chromosome}.g.vcf.gz')
+        vcf = get_dir('output','{animal}.bwa.{chrom}.vcf.gz'),
+        gvcf = get_dir('output','{animal}.bwa.{chrom}.g.vcf.gz')
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/ -B {PurePath(output["vcf"]).parent}:/{PurePath(output["vcf"]).parent}'),
@@ -270,10 +270,10 @@ rule deepvariant_postprocess:
 
 rule split_gvcf_chromosomes:
     input:
-        get_dir('output','{animal}.bwa.{chromosome}.g.vcf.gz',chromosome = config.get('regions','all'))
+        get_dir('output','{animal}.bwa.{chrom}.g.vcf.gz',chrom=config.get('regions','all'))
     output:
-        gvcf = temp((get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz',chr=CHR) for CHR in CHROMOSOMES)),
-        tbi = temp((get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz.tbi',chr=CHR) for CHR in CHROMOSOMES))
+        gvcf = temp((get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz',chrom=CHR) for CHR in CHROMOSOMES)),
+        tbi = temp((get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz.tbi',chrom=CHR) for CHR in CHROMOSOMES))
     threads: 1
     resources:
         mem_mb = 4000,
@@ -304,12 +304,12 @@ def get_GL_config(preset):
     else:
         raise ValueError(f'Unknown config {preset=}')
 
-rule GLnexus_merge_chrm:
+rule GLnexus_merge:
     input:
-        vcf = (get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
-        tbi = (get_dir('splits','{animal}.bwa.{chr}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
+        vcf = (get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
+        tbi = (get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        multiext(get_dir('main','{cohort}.{chr,\d+|X|Y}.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','{cohort}.{chrom}.{preset}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
@@ -318,7 +318,7 @@ rule GLnexus_merge_chrm:
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024,
         container = config['GL_container']
-    threads: 12 #force using 4 threads for bgziping
+    threads: lambda wildcards: 24 if wildcards.chrom == 'all' else 12 #force using 4 threads for bgziping
     resources:
         mem_mb = 8000,
         disk_scratch = 50,
@@ -356,11 +356,11 @@ rule aggregate_chromosomes:
         tabix -p vcf {output[0]}
         '''
 
-rule GLnexus_merge:
+rule GLnexus_merge_X:
     input:
-        expand(get_dir('splits','{animal}.bwa.{{{chrs}}}.g.vcf.gz'),animal=config['animals'])
+        expand(get_dir('splits','{animal}.bwa.{{{chrom}}}.g.vcf.gz'),animal=config['animals'])
     output:
-        multiext(get_dir('main','{cohort}.{chrs}.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','{cohort}.{chrom}.{preset}.vcf.Xgz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
