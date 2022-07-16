@@ -182,8 +182,8 @@ rule deepvariant_make_examples:
         regions = lambda wildcards: get_regions(wildcards) 
     threads: 1
     resources:
-        mem_mb = 6000,
-        walltime = '4:00',#get_walltime,
+        mem_mb = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),,
+        walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4:00'),#get_walltime,
         disk_scratch = 1,
         use_singularity = True
     priority: 50
