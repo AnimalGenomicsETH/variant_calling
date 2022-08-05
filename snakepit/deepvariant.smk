@@ -25,25 +25,40 @@ def get_dir(base='work',ext='', **kwargs):
 def get_walltime(wildcards, attempt):
     return {1:'4:00',2:'24:00'}[attempt]
 
-if config.get("per_sample",True):
-    ruleorder: split_gvcf_chromosomes > deepvariant_postprocess 
-else:
-    ruleorder: deepvariant_postprocess > split_gvcf_chromosomes
+if 'regions_bed' in config:
+    ruleorder: bcftools_scatter > GLnexus_merge
 
-
-if config.get("merging","all") == "all":
-    ruleorder: GLnexus_merge > aggregate_chromosomes
-else:
-    ruleorder: aggregate_chromosomes > GLnexus_merge
+#if config.get("merging","all") == "all":
+#    ruleorder: GLnexus_merge > aggregate_chromosomes
+#else:
+#    ruleorder: aggregate_chromosomes > GLnexus_merge
 
 #include: 'mendelian.smk'
+def determine_run_regions():
+    regions = []
+    if 'regions_bed' in config:
+        with open(config['regions_bed'],'r') as bed:
+            for line in bed:
+                parts = line.rstrip().split()
+                if len(parts) == 1:
+                    regions.append(parts[0])
+                elif len(parts) == 2:
+                    regions.append('{}:0-{}'.format(*parts))
+                else:
+                    regions.append('{}:{}-{}'.format(*parts[:3]))
+    else:
+        with open(config['reference']+'.fai','r') as fai:
+            regions.append([line.split()[0] for line in fin])
+    return regions
+
+CHROMOSOMES=['A','B']
 
 wildcard_constraints:
     haplotype = r'asm|hap1|hap2|parent1|parent2',
     phase = r'unphased|phased',
     model = r'pbmm2|hybrid|bwa|mm2',
     caller = r'DV|GATK',
-    chrom = r'\d+|all|chromosomes',
+    #chrom = r'all|chromosomes' + r'|'.join(CHROMOSOMES),
     cohort = r'\w+'
     
 def get_model(model,base='/opt/models',ext='model.ckpt'):
@@ -84,19 +99,29 @@ def capture_logic():
     else:
         return [get_dir('main',f'{config.get("cohort","cohort")}.{config.get("regions","all")}.{str(PurePath(config.get("GL_config","WGS")).with_suffix(""))}.vcf.gz')]
 
+REGIONS = determine_run_regions()
 rule all:
     input:
-        capture_logic()
-
-CHROMOSOMES = list(map(str,range(1,config.get('autosomes',30)))) + config.get('special_chromosomes',[])
+        expand(get_dir('main','{cohort}.{regions}.{preset}.vcf.gz{ext}'),ext=('','.tbi'),cohort=config.get("cohort","cohort"),regions=REGIONS,preset=config.get("GL_config","WGS"))
+        #"regions" if 'regions_bed' in config else config.get('chromosome',0),preset=config.get("GL_config","WGS"))
+        #capture_logic()
 
 def get_regions(wildcards):
+
+    if wildcards.callset == 'regions':
+        return f'--regions "{" ".join(map(str,REGIONS))}"'
+    else:
+        return f'--regions {wildcards.callset}'
     if config.get('regions','all') == 'all':
         return ''
     elif config.get('regions',False) == 'chromosomes':
-        return f'--regions "{" ".join(map(str,CHROMOSOMES))}"'
+        #TEMP CODE
+        return f'--exclude_regions "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18"'
+        #return f'--regions "{" ".join(map(str,CHROMOSOMES))}"'
     else:
         return f'--regions {wildcards.chromosome}'
+#how to handle 0 region
+#--exclude_regions
 
 ## DEEPVARIANT SPECIAL ARG HANDLING
 def _is_quoted(value):
@@ -170,8 +195,8 @@ rule deepvariant_make_examples:
         ref = multiext(config['reference'],'','.fai'),
         bam = multiext(get_dir('input','{animal}.bam'),'','.bai')
     output:
-        example = temp(get_dir('work','make_examples.{chromosome}.tfrecord-{N}-of-{sharding}.gz')),
-        gvcf = temp(get_dir('work','gvcf.{chromosome}.tfrecord-{N}-of-{sharding}.gz'))
+        example = temp(get_dir('work','make_examples.{callset}.tfrecord-{N}-of-{sharding}.gz')),
+        gvcf = temp(get_dir('work','gvcf.{callset}.tfrecord-{N}-of-{sharding}.gz'))
     params:
         examples = lambda wildcards, output: PurePath(output['example']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
@@ -182,7 +207,7 @@ rule deepvariant_make_examples:
         regions = lambda wildcards: get_regions(wildcards) 
     threads: 1
     resources:
-        mem_mb = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),,
+        mem_mb = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
         walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4:00'),#get_walltime,
         disk_scratch = 1,
         use_singularity = True
@@ -206,9 +231,9 @@ rule deepvariant_make_examples:
 
 rule deepvariant_call_variants:
     input:
-        (get_dir('work', f'make_examples.{{chromosome}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
+        (get_dir('work', f'make_examples.{{callset}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
     output:
-        temp(get_dir('work','call_variants_output.{chromosome}.tfrecord.gz'))
+        temp(get_dir('work','call_variants_output.{callset}.tfrecord.gz'))
     params:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model = get_model(config['model']),
@@ -221,7 +246,7 @@ rule deepvariant_call_variants:
         mem_mb = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
         disk_scratch = 1,
         use_singularity = True,
-        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','4:00') #get_walltime,
+        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','2G4:00'),
         #use_AVX512 = True
     priority: 90
     shell:
@@ -238,11 +263,11 @@ rule deepvariant_call_variants:
 rule deepvariant_postprocess:
     input:
         ref = multiext(config['reference'],'','.fai'),
-        variants = get_dir('work','call_variants_output.{chrom}.tfrecord.gz'),
-        gvcf = (get_dir('work', f'gvcf.{{chrom}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
+        variants = get_dir('work','call_variants_output.{callset}.tfrecord.gz'),
+        gvcf = (get_dir('work', f'gvcf.{{callset}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
     output:
-        vcf = get_dir('output','{animal}.bwa.{chrom}.vcf.gz'),
-        gvcf = get_dir('output','{animal}.bwa.{chrom}.g.vcf.gz')
+        vcf = get_dir('output','{animal}.bwa.{callset}.vcf.gz'),
+        gvcf = get_dir('output','{animal}.bwa.{callset}.g.vcf.gz')
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/ -B {PurePath(output["vcf"]).parent}:/{PurePath(output["vcf"]).parent}'),
@@ -268,31 +293,25 @@ rule deepvariant_postprocess:
         --novcf_stats_report
         '''
 
-rule split_gvcf_chromosomes:
+rule bcftools_scatter:
     input:
-        get_dir('output','{animal}.bwa.{chrom}.g.vcf.gz',chrom=config.get('regions','all'))
+        get_dir('output','{animal}.bwa.regions.g.vcf.gz')
     output:
-        gvcf = temp((get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz',chrom=CHR) for CHR in CHROMOSOMES)),
-        tbi = temp((get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz.tbi',chrom=CHR) for CHR in CHROMOSOMES))
-    threads: 1
+        vcf = (get_dir('splits','{animal}_{region}.vcf.gz',region=R) for R in REGIONS),
+        tbi = (get_dir('splits','{animal}_{region}.vcf.gz.tbi',region=R) for R in REGIONS)
+    params:
+        prefix = '{animal}_',
+        scatter = ','.join(REGIONS)
+    threads: 4
     resources:
-        mem_mb = 4000,
-        walltime = '4:00'
-    priority: 10
-    run:
-        placed_chromosomes = '|'.join(CHROMOSOMES + config.get('ignore_chromosomes',[]))
-        for idx, chromosome in enumerate(CHROMOSOMES):
-            out_file = output.gvcf[idx]
-            if chromosome == '0': #catch all unplaced contigs INCLUDING MT contig
-                chromosome = f'$(tabix -l {{input}} | grep -wvE {placed_chromosomes})'
-            shell(f'tabix -h {{input}} {chromosome} | bgzip -@ {{threads}} -c > {out_file}')
-            shell(f'tabix -p vcf {out_file}')
-
-#'''
-#params:
-#    unplaced = '-x unplaced.vvcf
-#bcftools +scatter {input} --threads {threads} -s {params.scatter} {params.unplaced} -Oz -o
-#'''
+        mem_mb = 2000,
+        walltime = '60'
+    shell:
+        '''
+        bcftools +scatter {input} --threads {threads} -s {params.scatter} -Oz -o {output} -p {params.prefix}
+        vcf=({output.vcf})
+        parallel -j {threads} -u tabix -fp {{}} ::: ${{vcf[@]}}
+        '''
 
 def get_GL_config(preset):
     if preset == 'WGS':
@@ -300,16 +319,24 @@ def get_GL_config(preset):
     elif preset == 'Unfiltered':
         return 'DeepVariant_unfiltered'
     elif 'GL_config' in config:
-        return '/data/' + config['GL_config']
+        return '/data/' + config['GL_config'][preset]
     else:
         raise ValueError(f'Unknown config {preset=}')
 
+def get_merging_input(wildcards,ext=''):
+    if 'regions_bed' in config: #wildcards.callset == 'regions':
+        return expand(get_dir('splits',f'{{animal}}_{{region}}.vcf.gz{ext}'),animal=config['animals'],region=wildcards.callset)
+    else:
+        return expand(get_dir('output','{animal}.bwa.{callset}.g.vcf.gz'),animal=config['animals'],callset=wildcards.callset)
+
 rule GLnexus_merge:
     input:
-        vcf = (get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
-        tbi = (get_dir('splits','{animal}.bwa.{chrom}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
+        vcf = lambda wildcards: get_merging_input(wildcards),
+        tbi = lambda wildcards: get_merging_input(wildcards,'.tbi')
+        #vcf = (get_dir('splits','{animal}_{region}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
+        #tbi = (get_dir('splits','{animal}_{region}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        multiext(get_dir('main','{cohort}.{chrom}.{preset}.vcf.gz'),'','.tbi')
+        multiext(get_dir('main','{cohort}.{callset}.{preset}.vcf.gz'),'','.tbi')
     params:
         gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
@@ -318,63 +345,13 @@ rule GLnexus_merge:
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024,
         container = config['GL_container']
-    threads: lambda wildcards: 24 if wildcards.chrom == 'all' else 12 #force using 4 threads for bgziping
+    threads: lambda wildcards: 24 if False == 'all' else 12 #force using 4 threads for bgziping
     resources:
         mem_mb = 8000,
         disk_scratch = 50,
         walltime = '4:00',
         use_singularity = True
     priority: 25
-    shell:
-        '''
-        ulimit -Sn 4096
-        {params.singularity_call} \
-        {params.container} \
-        /bin/bash -c " /usr/local/bin/glnexus_cli \
-        --dir {params.DB} \
-        --config {params.preset} \
-        --threads {threads} \
-        --mem-gbytes {params.mem} \
-        {params.gvcfs} \
-        | bcftools view - | bgzip -@ 4 -c > {params.out}"
-        tabix -p vcf {output[0]}
-        '''
-
-rule aggregate_chromosomes:
-    input:
-        vcf = (get_dir('main','{cohort}.{CHR}.{preset}.vcf.gz',CHR=CHR) for CHR in CHROMOSOMES),
-        tbi = (get_dir('main','{cohort}.{CHR}.{preset}.vcf.gz.tbi',CHR=CHR) for CHR in CHROMOSOMES)
-    output:
-        multiext(get_dir('main','{cohort}.chromosomes.{preset}.vcf.gz'),'','.tbi')
-    threads: 12
-    resources:
-        mem_mb = 2000,
-        walltime = '4:00'
-    shell:
-        '''
-        bcftools concat --threads {threads} -o {output[0]} -Oz {input.vcf}
-        tabix -p vcf {output[0]}
-        '''
-
-rule GLnexus_merge_X:
-    input:
-        expand(get_dir('splits','{animal}.bwa.{{{chrom}}}.g.vcf.gz'),animal=config['animals'])
-    output:
-        multiext(get_dir('main','{cohort}.{chrom}.{preset}.vcf.Xgz'),'','.tbi')
-    params:
-        gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input),
-        out = lambda wildcards, output: '/data' / PurePath(output[0]),
-        DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
-        preset = lambda wildcards: get_GL_config(wildcards.preset),
-        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024,
-        container = config['GL_container']
-    threads: 12 #force using threads for bgziping
-    resources:
-        mem_mb = 6000,
-        disk_scratch = 50,
-        walltime = "4:00",
-        use_singularity = True
     shell:
         '''
         ulimit -Sn 4096
