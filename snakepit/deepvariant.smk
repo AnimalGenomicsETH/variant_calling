@@ -59,19 +59,20 @@ wildcard_constraints:
     model = r'pbmm2|hybrid|bwa|mm2',
     caller = r'DV|GATK',
     #chrom = r'all|chromosomes' + r'|'.join(CHROMOSOMES),
-    cohort = r'\w+'
+    cohort = r'\w+',
+#    preset = rf'{config.get("GL_config","WGS")}'
     
 def get_model(model,base='/opt/models',ext='model.ckpt'):
     model_location = f'{base}/{{}}/{ext}'
-    if model == 'pbmm2':
-        return model_location.format('pacbio')
-    elif model == 'hybrid':
-        return model_location.format('hybrid_pacbio_illumina')
-    elif model == 'bwa':
-        return model_location.format('wgs')
-    elif model == 'mm2':
-        return model_location.format('pacbio')
-
+    match model:
+        case ['pbmm2','mm2']:
+            return model_location.format('pacbio')
+        case 'hybrid':
+            return model_location.format('hybrid_pacbio_illumina')
+        case 'bwa':
+            return model_location.format('wgs')
+        case _:
+            return model
 
 def make_singularity_call(wildcards,extra_args='',tmp_bind='$TMPDIR',input_bind=False, output_bind=False, work_bind=False):
     call = f'singularity exec {extra_args} '
@@ -123,70 +124,14 @@ def get_regions(wildcards):
 #how to handle 0 region
 #--exclude_regions
 
-## DEEPVARIANT SPECIAL ARG HANDLING
-def _is_quoted(value):
-  if value.startswith('"') and value.endswith('"'):
-    return True
-  if value.startswith("'") and value.endswith("'"):
-    return True
-  return False
-
-def _add_quotes(value):
-  if isinstance(value, str) and _is_quoted(value):
-    return value
-  return '"{}"'.format(value)
-
-def _extra_args_to_dict(extra_args):
-  """Parses comma-separated list of flag_name=flag_value to dict."""
-  args_dict = {}
-  if extra_args is None:
-    return args_dict
-  for extra_arg in extra_args.split(','):
-    (flag_name, flag_value) = extra_arg.split('=')
-    flag_name = flag_name.strip('-')
-    # Check for boolean values.
-    if flag_value.lower() == 'true':
-      flag_value = True
-    elif flag_value.lower() == 'false':
-      flag_value = False
-    args_dict[flag_name] = flag_value
-  return args_dict
-
-def _extend_command_by_args_dict(command_S, extra_args):
-  """Adds `extra_args` to the command string."""
-  command = []
-  for key in sorted(extra_args):
-    value = extra_args[key]
-    if value is None:
-      continue
-    if isinstance(value, bool):
-      added_arg = '' if value else 'no'
-      added_arg += key
-      command.extend(['--' + added_arg])
-    else:
-      command.extend(['--' + key, _add_quotes(value)])
-  return command_S + ' '.join(command)
-
-def get_model_params(model):
-    special_args = {}
-    if model == 'bwa':
-        special_args['channels'] = 'insert_size'
-    elif model == 'mm2':
-        special_args['add_hp_channel'] = True
-        special_args['alt_aligned_pileup'] = 'diff_channels'
-        special_args['max_reads_per_partition'] = 600
-        special_args['min_mapping_quality'] = 1
-        special_args['parse_sam_aux_fields'] = True
-        special_args['partition_size'] = 25000
-        special_args['phase_reads'] = True
-        special_args['pileup_image_width'] = 199
-        special_args['realign_reads'] = False
-        special_args['sort_by_haplotypes'] = True
-        special_args['track_ref_reads'] = True
-        special_args['vsc_min_fraction_indels'] = 0.12
-
-    return _extend_command_by_args_dict('',special_args)
-
+def make_custom_example_arguments(model):
+    match model:
+        case 'RNA':
+            return '--channels \'\' --split_skip_reads'
+        case 'PACBIO':
+            return '--add_hp_channel --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels "0.12"'
+        case 'WGS':
+            return '--channels "insert_size"'
 
 ## END DEEPVARIANT SPECIAL ARG HANDLING
 #error can be caused by corrupted file, check gzip -t -v
@@ -200,10 +145,10 @@ rule deepvariant_make_examples:
     params:
         examples = lambda wildcards, output: PurePath(output['example']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        model_args = get_model_params(config['model']),
+        model_args = make_custom_example_arguments(config['model']),
         singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,input_bind=False,output_bind=True,work_bind=False,extra_args=f'-B {PurePath(output["example"]).parent}:/{PurePath(output["example"]).parent} -B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:{PurePath(input.bam[0]).parent}'),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
-        contain = lambda wildcards: config['DV_container'],
+        _container = lambda wildcards: config['DV_container'],
         regions = lambda wildcards: get_regions(wildcards) 
     threads: 1
     resources:
@@ -214,11 +159,11 @@ rule deepvariant_make_examples:
     priority: 50
     shell:
         '''
-        {params.singularity_call} \
-        {params.contain} \
+        singularity exec -B $TMPDIR -B ... \
+        {params._container} \
         /opt/deepvariant/bin/make_examples \
         --mode calling \
-        --ref {params.ref} \
+        --ref {input.ref[0]} \
         --include_med_dp \
         --reads {input.bam[0]} \
         --examples {params.examples} \
@@ -239,7 +184,7 @@ rule deepvariant_call_variants:
         model = get_model(config['model']),
         dir_ = lambda wildcards: get_dir('work',**wildcards),
         singularity_call = lambda wildcards, output, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads} -B {PurePath(output[0]).parent}:/{PurePath(output[0]).parent}'),
-        contain = lambda wildcards: config['DV_container'],
+        _container = lambda wildcards: config['DV_container'],
         vino = '--use_openvino --openvino_model_dir /tmp' if config.get('openvino',False) else ''
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
@@ -252,7 +197,7 @@ rule deepvariant_call_variants:
     shell:
         '''
         {params.singularity_call} \
-        {params.contain} \
+        {params._container} \
         /opt/deepvariant/bin/call_variants \
         --outfile /{output} \
         --examples /{params.examples} \
@@ -301,16 +246,17 @@ rule bcftools_scatter:
         tbi = (get_dir('splits','{animal}_{region}.vcf.gz.tbi',region=R) for R in REGIONS)
     params:
         prefix = '{animal}_',
+        out = lambda wildcards,output: PurePath(output[0]).parent,
         scatter = ','.join(REGIONS)
-    threads: 4
+    threads: 2
     resources:
         mem_mb = 2000,
         walltime = '60'
     shell:
         '''
-        bcftools +scatter {input} --threads {threads} -s {params.scatter} -Oz -o {output} -p {params.prefix}
+        bcftools +scatter {input} --threads {threads} -s {params.scatter} -Oz -o {params.out} -p {params.prefix}
         vcf=({output.vcf})
-        parallel -j {threads} -u tabix -fp {{}} ::: ${{vcf[@]}}
+        parallel -j {threads} -u tabix -fp vcf {{}} ::: ${{vcf[@]}}
         '''
 
 def get_GL_config(preset):
