@@ -18,7 +18,7 @@ def determine_run_regions():
                     regions.append('{}:{}-{}'.format(*parts[:3]))
     else:
         with open(config['reference']+'.fai','r') as fai:
-            regions.append([line.split()[0] for line in fin])
+            regions.append([line.split()[0] for line in fai])
     return regions
 
 
@@ -28,49 +28,55 @@ wildcard_constraints:
     model = r'pbmm2|hybrid|bwa|mm2',
     caller = r'DV|GATK',
     cohort = r'\w+',
+    region = r'\w+',
+    run = r'\w+'
 #    preset = rf'{config.get("GL_config","WGS")}'
     
 def get_model(model,base='/opt/models',ext='model.ckpt'):
     model_location = f'{base}/{{}}/{ext}'
     match model:
-        case ['pbmm2','mm2']:
+        case 'PACBIO' | 'mm2':
             return model_location.format('pacbio')
         case 'hybrid':
             return model_location.format('hybrid_pacbio_illumina')
-        case 'bwa':
+        case 'WGS':
             return model_location.format('wgs')
         case _:
             return model
 
-for dir_ in ('output','work'):
-    for animal,reference in product(config['animals'],config['reference']):
-        Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
+#for dir_ in ('output','work'):
+#    for animal,reference in product(config['animals'],config['reference']):
+#        Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
 REGIONS = determine_run_regions()
 
-RUN_NAME = config.get('Run_name','deepvariant')
+config.setdefault('Run_name', 'deepvariant')
+
+if True:
+    print('Binding in relevant paths for singularity')
+    workflow.singularity_args = f'-B $TMPDIR -B {config["bam_path"]} -B {PurePath(config["reference"]).parent}'
+    for preset in config.get('GL_config',[]):
+        if Path(config['GL_config'][preset]).exists():
+            workflow.singularity_args += f' -B {PurePath(config["GL_config"][preset]).parent}'
+    if Path(config['model']).exists():
+        workflow.singularity_args += f' -B {PurePath(config["model"]).parent}'
+
+print(workflow.singularity_args)
+
+def get_regions(region):
+    match region:
+        case 'bed':
+            return '--regions '
+
+        case 'all' | _:
+            return ''
 
 rule all:
     input:
-        expand(get_dir('main','{cohort}.{regions}.{preset}.vcf.gz{ext}'),ext=('','.tbi'),cohort=config.get("cohort","cohort"),regions=REGIONS,preset=config.get("GL_config","WGS"))
+        expand('{name}/{region}.{preset}.vcf.gz',name=config['Run_name'],region=config['regions'],preset=config['GL_config'])
+        #expand('{cohort}/{chromosome}.{preset}.vcf.gz{ext}',ext=('','.tbi'),cohort=config['Run_name'],chromosome=get_regions(),preset=config.get("GL_config","WGS"))
 
-def get_regions(wildcards):
-
-    if wildcards.callset == 'regions':
-        return f'--regions "{" ".join(map(str,REGIONS))}"'
-    else:
-        return f'--regions {wildcards.callset}'
-    if config.get('regions','all') == 'all':
-        return ''
-    elif config.get('regions',False) == 'chromosomes':
-        #TEMP CODE
-        return f'--exclude_regions "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18"'
-        #return f'--regions "{" ".join(map(str,CHROMOSOMES))}"'
-    else:
-        return f'--regions {wildcards.chromosome}'
-#how to handle 0 region
-#--exclude_regions
-
+        #expand(get_dir('main','{cohort}.{regions}.{preset}.vcf.gz{ext}'),ext=('','.tbi'),cohort=config.get("cohort","cohort"),regions=REGIONS,preset=config.get("GL_config","WGS"))
 
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
 def make_custom_example_arguments(model):
@@ -82,23 +88,24 @@ def make_custom_example_arguments(model):
         case 'WGS':
             return '--channels "insert_size"'
 
+
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
-        bam = multiext(config['bam_path']+'{sample}.bam'),'','.bai')
+        bam = multiext(config['bam_path']+'{sample}/{sample}.bam','','.bai')
     output:
-        examples = temp('deepvariant/intermediate_results_{sample}/make_examples.{callset}.tfrecord-{N}-of-{sharding}.gz'),
-        gvcf = temp('deepvariant/intermediate_results_{sample}/gvcf.{callset}.tfrecord-{N}-of-{sharding}.gz')
+        examples = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz'),
+        gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz')
     params:
         examples = lambda wildcards, output: PurePath(output['examples']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model_args = make_custom_example_arguments(config['model']),
-        regions = lambda wildcards: get_regions(wildcards) 
+        regions = lambda wildcards: get_regions(wildcards.region) 
     threads: 1
     resources:
         mem_mb = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
-        walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4:00'),#get_walltime,
+        walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4:00'),
         scratch = "1G"
     priority: 50
     container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
@@ -119,9 +126,9 @@ rule deepvariant_make_examples:
 
 rule deepvariant_call_variants:
     input:
-        expand('deepvariant/intermediate_results_{{sample}}/make_examples.{{callset}}.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
+        expand('{{run}}/deepvariant/intermediate_results_{{sample}}_{{region}}/make_examples.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
     output:
-        temp('deepvariant/intermediate_results_{sample}/call_variants_output.{callset}.tfrecord.gz')
+        temp('{run}/deepvariant/intermediate_results_{sample}_{region}/call_variants_output.tfrecord.gz')
     params:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model = get_model(config['model'])
@@ -135,19 +142,19 @@ rule deepvariant_call_variants:
     shell:
         '''
         /opt/deepvariant/bin/call_variants \
-        --outfile /{output} \
-        --examples /{params.examples} \
+        --outfile {output} \
+        --examples {params.examples} \
         --checkpoint {params.model}
         '''
 
 rule deepvariant_postprocess:
     input:
         reference = multiext(config['reference'],'','.fai'),
-        rules.deepvariant_call_variants.output[0],
-        gvcf = expand('deepvariant/intermediate_results_{{sample}}/gvcf.{{callset}}.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
+        variants = rules.deepvariant_call_variants.output[0],
+        gvcf = expand('{{run}}/deepvariant/intermediate_results_{{sample}}_{{region}}/gvcf.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
     output:
-        vcf = 'deepvariant/{sample}.bwa.{callset}.vcf.gz',
-        gvcf = get_dir('output','{sample}.bwa.{callset}.g.vcf.gz')
+        vcf = '{run}/deepvariant/{sample}.{region}.vcf.gz',
+        gvcf = '{run}/deepvariant/{sample}.{region}.g.vcf.gz'
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz')
     threads: 1
@@ -170,14 +177,14 @@ rule deepvariant_postprocess:
 
 rule bcftools_scatter:
     input:
-        get_dir('output','{animal}.bwa.regions.g.vcf.gz')
+        '{run}/deepvariant/{sample}.{region}.g.vcf.gz'
+        #rules.deepvariant_postprocess.output[1]
     output:
-        vcf = (get_dir('splits','{animal}_{region}.vcf.gz',region=R) for R in REGIONS),
-        tbi = (get_dir('splits','{animal}_{region}.vcf.gz.tbi',region=R) for R in REGIONS)
+        vcf = '3'#expand('{{run}}/scattered/{{sample}}_{region}.vcf.gz',region=config['regions']),
     params:
-        prefix = '{animal}_',
-        out = lambda wildcards,output: PurePath(output[0]).parent,
-        scatter = ','.join(REGIONS)
+        prefix = '{sample}_',
+        out = lambda wildcards,output: 3,#PurePath(output[0]).parent,
+        scatter = ','.join(['a','b'])
     threads: 2
     resources:
         mem_mb = 2000,
@@ -190,42 +197,38 @@ rule bcftools_scatter:
         '''
 
 def get_GL_config(preset):
-    if preset == 'WGS':
-        return 'DeepVariantWGS'
-    elif preset == 'Unfiltered':
-        return 'DeepVariant_unfiltered'
-    elif 'GL_config' in config:
-        return '/data/' + config['GL_config'][preset]
-    else:
-        raise ValueError(f'Unknown config {preset=}')
+    match preset:
+        case 'WGS':
+            return 'DeepVariantWGS'
+        case 'Unfiltered':
+            return 'DeepVariant_unfiltered'
+        case _:
+            return config['GL_config'][preset]
 
 def get_merging_input(wildcards,ext=''):
-    if 'regions_bed' in config: #wildcards.callset == 'regions':
-        return expand(get_dir('splits',f'{{animal}}_{{region}}.vcf.gz{ext}'),animal=config['animals'],region=wildcards.callset)
-    else:
-        return expand(get_dir('output','{animal}.bwa.{callset}.g.vcf.gz'),animal=config['animals'],callset=wildcards.callset)
+    #if 'regions_bed' in config: #wildcards.callset == 'regions':
+    #    return expand(get_dir('splits',f'{{animal}}_{{region}}.vcf.gz{ext}'),animal=config['animals'],region=wildcards.callset)
+    #else:
+    return expand('{{run}}/deepvariant/{sample}.{{region}}.g.vcf.gz',sample=config['samples'])
+    
 
 rule GLnexus_merge:
     input:
-        vcf = lambda wildcards: get_merging_input(wildcards),
+        #vcf = expand('{{run}}/deepvariant/{sample}.{{region}}.g.vcf.gz',sample=config['samples'])
+        gvcfs = lambda wildcards: get_merging_input(wildcards),
         tbi = lambda wildcards: get_merging_input(wildcards,'.tbi')
-        #vcf = (get_dir('splits','{animal}_{region}.g.vcf.gz',animal=ANIMAL) for ANIMAL in config['animals']),
-        #tbi = (get_dir('splits','{animal}_{region}.g.vcf.gz.tbi',animal=ANIMAL) for ANIMAL in config['animals'])
     output:
-        multiext(get_dir('main','{cohort}.{callset}.{preset}.vcf.gz'),'','.tbi')
+        multiext('{run}/{region}.{preset}.vcf.gz','','.tbi')
     params:
-        gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input.vcf),
-        out = lambda wildcards, output: '/data' / PurePath(output[0]),
         preset = lambda wildcards: get_GL_config(wildcards.preset),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
-    threads: lambda wildcards: 24 if False == 'all' else 12 #force using 4 threads for bgziping
+    threads: config.get('resources',{}).get('merge',{}).get('threads',12),
     resources:
-        mem_mb = 8000,
-        disk_scratch = 50,
-        walltime = '4:00',
-        use_singularity = True
+        mem_mb = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
+        walltime = config.get('resources',{}).get('merge',{}).get('walltime','4:00'),
+        scratch = '50G'
     priority: 25
-    config.get('containers',{}).get('GLnexus','docker://google/deepvariant:latest')
+    container: config.get('containers',{}).get('GLnexus','docker://ghcr.io/dnanexus-rnd/glnexus:v1.4.3')
     shell:
         '''
         /usr/local/bin/glnexus_cli \
@@ -233,8 +236,8 @@ rule GLnexus_merge:
         --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
-        {params.gvcfs} |\
-        bcftools view - | bgzip -@ 4 -c > {params.out}
+        {input.gvcfs} |\
+        bcftools view --threads 4 -o {output[0]} - 
 
         tabix -p vcf {output[0]}
         '''
