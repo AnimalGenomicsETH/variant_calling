@@ -1,39 +1,9 @@
 from pathlib import Path,PurePath
 from itertools import product
 
-class Default(dict):
-    def __missing__(self, key):
-        return '{'+key+'}'
-
-def get_dir(base='work',ext='', **kwargs):
-    if base == 'input':
-        base_dir = config.get('bam_path','')
-    elif base == 'output':
-        base_dir = 'output_DV'
-    elif base == 'splits':
-        base_dir = 'split_files'
-    elif base == 'work':
-        base_dir = get_dir('output','intermediate_results_{animal}',**kwargs)
-    elif base == 'mendel':
-        base_dir = '{caller}_mendel'
-    elif base == 'main':
-        base_dir = ''
-    else:
-        raise Exception('Base not found')
-    return str(Path(base_dir.format_map(Default(kwargs))) / ext.format_map(Default(kwargs)))
-
-def get_walltime(wildcards, attempt):
-    return {1:'4:00',2:'24:00'}[attempt]
-
 if 'regions_bed' in config:
     ruleorder: bcftools_scatter > GLnexus_merge
 
-#if config.get("merging","all") == "all":
-#    ruleorder: GLnexus_merge > aggregate_chromosomes
-#else:
-#    ruleorder: aggregate_chromosomes > GLnexus_merge
-
-#include: 'mendelian.smk'
 def determine_run_regions():
     regions = []
     if 'regions_bed' in config:
@@ -51,14 +21,12 @@ def determine_run_regions():
             regions.append([line.split()[0] for line in fin])
     return regions
 
-CHROMOSOMES=['A','B']
 
 wildcard_constraints:
     haplotype = r'asm|hap1|hap2|parent1|parent2',
     phase = r'unphased|phased',
     model = r'pbmm2|hybrid|bwa|mm2',
     caller = r'DV|GATK',
-    #chrom = r'all|chromosomes' + r'|'.join(CHROMOSOMES),
     cohort = r'\w+',
 #    preset = rf'{config.get("GL_config","WGS")}'
     
@@ -74,38 +42,14 @@ def get_model(model,base='/opt/models',ext='model.ckpt'):
         case _:
             return model
 
-def make_singularity_call(wildcards,extra_args='',tmp_bind='$TMPDIR',input_bind=False, output_bind=False, work_bind=False):
-    call = f'singularity exec {extra_args} '
-    if input_bind:
-        call += f'-B {":/".join([get_dir("input",**wildcards)]*2)} '
-    if output_bind:
-        call += f'-B {":/".join([get_dir("output",**wildcards)]*2)} '
-    if work_bind:
-        call += f'-B {":/".join([get_dir("work",**wildcards)]*2)} '
-    if tmp_bind:
-        call += f'-B {tmp_bind}:/tmp '
-    
-    return call
-
 for dir_ in ('output','work'):
     for animal,reference in product(config['animals'],config['reference']):
         Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
-
-
-def capture_logic():
-    if 'trios' in config:
-        return [get_dir('main','mendel.{caller}.chromosomes.summary.df',caller=caller) for caller in ('DV','GATK')]
-    #elif config.get('regions') == 'chromosomes':
-    #    return [get_dir('main',f'{config.get("cohort","cohort")}.chromosomes.{config.get("GL_config","WGS")}.vcf.gz')]
-    else:
-        return [get_dir('main',f'{config.get("cohort","cohort")}.{config.get("regions","all")}.{str(PurePath(config.get("GL_config","WGS")).with_suffix(""))}.vcf.gz')]
 
 REGIONS = determine_run_regions()
 rule all:
     input:
         expand(get_dir('main','{cohort}.{regions}.{preset}.vcf.gz{ext}'),ext=('','.tbi'),cohort=config.get("cohort","cohort"),regions=REGIONS,preset=config.get("GL_config","WGS"))
-        #"regions" if 'regions_bed' in config else config.get('chromosome',0),preset=config.get("GL_config","WGS"))
-        #capture_logic()
 
 def get_regions(wildcards):
 
@@ -124,6 +68,8 @@ def get_regions(wildcards):
 #how to handle 0 region
 #--exclude_regions
 
+
+#NOTE: may need to be updated if deepvariant changes its internal parameters.
 def make_custom_example_arguments(model):
     match model:
         case 'RNA':
@@ -133,29 +79,25 @@ def make_custom_example_arguments(model):
         case 'WGS':
             return '--channels "insert_size"'
 
-## END DEEPVARIANT SPECIAL ARG HANDLING
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
-        ref = multiext(config['reference'],'','.fai'),
-        bam = multiext(get_dir('input','{animal}.bam'),'','.bai')
+        reference = multiext(config['reference'],'','.fai'),
+        bam = multiext(config['bam_path']+'{sample}.bam'),'','.bai')
     output:
-        example = temp(get_dir('work','make_examples.{callset}.tfrecord-{N}-of-{sharding}.gz')),
-        gvcf = temp(get_dir('work','gvcf.{callset}.tfrecord-{N}-of-{sharding}.gz'))
+        examples = temp('deepvariant/intermediate_results_{sample}/make_examples.{callset}.tfrecord-{N}-of-{sharding}.gz'),
+        gvcf = temp('deepvariant/intermediate_results_{sample}/gvcf.{callset}.tfrecord-{N}-of-{sharding}.gz')
     params:
-        examples = lambda wildcards, output: PurePath(output['example']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
+        examples = lambda wildcards, output: PurePath(output['examples']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model_args = make_custom_example_arguments(config['model']),
-        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,input_bind=False,output_bind=True,work_bind=False,extra_args=f'-B {PurePath(output["example"]).parent}:/{PurePath(output["example"]).parent} -B {PurePath(input.ref[0]).parent}:/reference/ -B {Path(input.bam[0]).resolve().parent}:{PurePath(input.bam[0]).parent}'),
-        ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
         _container = lambda wildcards: config['DV_container'],
         regions = lambda wildcards: get_regions(wildcards) 
     threads: 1
     resources:
         mem_mb = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
         walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4:00'),#get_walltime,
-        disk_scratch = 1,
-        use_singularity = True
+        scratch = "1G"
     priority: 50
     shell:
         '''
@@ -163,12 +105,12 @@ rule deepvariant_make_examples:
         {params._container} \
         /opt/deepvariant/bin/make_examples \
         --mode calling \
-        --ref {input.ref[0]} \
+        --ref {input.reference[0]} \
         --include_med_dp \
         --reads {input.bam[0]} \
         --examples {params.examples} \
         --gvcf {params.gvcf} \
-        --sample_name {wildcards.animal} \
+        --sample_name {wildcards.sample} \
         {params.regions} \
         {params.model_args} \
         --task {wildcards.N}
@@ -176,61 +118,52 @@ rule deepvariant_make_examples:
 
 rule deepvariant_call_variants:
     input:
-        (get_dir('work', f'make_examples.{{callset}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
+        expand('deepvariant/intermediate_results_{{sample}}/make_examples.{{callset}}.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
     output:
-        temp(get_dir('work','call_variants_output.{callset}.tfrecord.gz'))
+        temp('deepvariant/intermediate_results_{sample}/call_variants_output.{callset}.tfrecord.gz')
     params:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model = get_model(config['model']),
-        dir_ = lambda wildcards: get_dir('work',**wildcards),
-        singularity_call = lambda wildcards, output, threads: make_singularity_call(wildcards,f'--env OMP_NUM_THREADS={threads} -B {PurePath(output[0]).parent}:/{PurePath(output[0]).parent}'),
         _container = lambda wildcards: config['DV_container'],
-        vino = '--use_openvino --openvino_model_dir /tmp' if config.get('openvino',False) else ''
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
         mem_mb = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
-        disk_scratch = 1,
-        use_singularity = True,
-        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','2G4:00'),
-        #use_AVX512 = True
+        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','24:00'),
+        scratch = "1G"
     priority: 90
     shell:
         '''
-        {params.singularity_call} \
+        singularity exec -B $TMPDIR -B ... \
         {params._container} \
         /opt/deepvariant/bin/call_variants \
         --outfile /{output} \
         --examples /{params.examples} \
-        --checkpoint {params.model} \
-        {params.vino}
+        --checkpoint {params.model}
         '''
 
 rule deepvariant_postprocess:
     input:
-        ref = multiext(config['reference'],'','.fai'),
-        variants = get_dir('work','call_variants_output.{callset}.tfrecord.gz'),
-        gvcf = (get_dir('work', f'gvcf.{{callset}}.tfrecord-{N:05}-of-{config["shards"]:05}.gz') for N in range(config['shards']))
+        reference = multiext(config['reference'],'','.fai'),
+        rules.deepvariant_call_variants.output[0],
+        gvcf = expand('deepvariant/intermediate_results_{{sample}}/gvcf.{{callset}}.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
     output:
-        vcf = get_dir('output','{animal}.bwa.{callset}.vcf.gz'),
-        gvcf = get_dir('output','{animal}.bwa.{callset}.g.vcf.gz')
+        vcf = 'deepvariant/{sample}.bwa.{callset}.vcf.gz'),
+        gvcf = get_dir('output','{sample}.bwa.{callset}.g.vcf.gz')
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        singularity_call = lambda wildcards, input, output: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/ -B {PurePath(output["vcf"]).parent}:/{PurePath(output["vcf"]).parent}'),
-        ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
-        contain = lambda wildcards: config['DV_container']
+        _container = lambda wildcards: config['DV_container']
     threads: 1
     resources:
         mem_mb = config.get('resources',{}).get('postprocess',{}).get('mem_mb',40000),
-        walltime = config.get('resources',{}).get('postprocess',{}).get('walltime','4:00'),#get_walltime,
-        disk_scratch = 1,
-        use_singularity = True
+        walltime = config.get('resources',{}).get('postprocess',{}).get('walltime','4:00'),
+        scratch = "1G"
     priority: 100
     shell:
         '''
-        {params.singularity_call} \
-        {params.contain} \
+        singularity exec -B $TMPDIR -B ... \
+        {params._container} \
         /opt/deepvariant/bin/postprocess_variants \
-        --ref {params.ref} \
+        --ref {input.reference[0]} \
         --infile {input.variants} \
         --outfile {output.vcf} \
         --gvcf_outfile {output.gvcf} \
@@ -290,7 +223,7 @@ rule GLnexus_merge:
         preset = lambda wildcards: get_GL_config(wildcards.preset),
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024,
-        container = config['GL_container']
+        _container = config['GL_container']
     threads: lambda wildcards: 24 if False == 'all' else 12 #force using 4 threads for bgziping
     resources:
         mem_mb = 8000,
@@ -301,8 +234,8 @@ rule GLnexus_merge:
     shell:
         '''
         ulimit -Sn 4096
-        {params.singularity_call} \
-        {params.container} \
+        singularity exec -B $TMPDIR ... \
+        {params._container} \
         /bin/bash -c " /usr/local/bin/glnexus_cli \
         --dir {params.DB} \
         --config {params.preset} \
