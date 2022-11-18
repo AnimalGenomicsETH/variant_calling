@@ -1,38 +1,13 @@
 from pathlib import Path,PurePath
-from itertools import product
 
 if 'regions_bed' in config:
     ruleorder: bcftools_scatter > GLnexus_merge
 
-def determine_run_regions():
-    regions = []
-    if 'regions_bed' in config:
-        with open(config['regions_bed'],'r') as bed:
-            for line in bed:
-                parts = line.rstrip().split()
-                if len(parts) == 1:
-                    regions.append(parts[0])
-                elif len(parts) == 2:
-                    regions.append('{}:0-{}'.format(*parts))
-                else:
-                    regions.append('{}:{}-{}'.format(*parts[:3]))
-    else:
-        with open(config['reference']+'.fai','r') as fai:
-            regions.append([line.split()[0] for line in fai])
-    return regions
-
-
 wildcard_constraints:
-    haplotype = r'asm|hap1|hap2|parent1|parent2',
-    phase = r'unphased|phased',
-    model = r'pbmm2|hybrid|bwa|mm2',
-    caller = r'DV|GATK',
-    cohort = r'\w+',
     region = r'\w+',
     run = r'\w+'
-#    preset = rf'{config.get("GL_config","WGS")}'
     
-def get_model(model,base='/opt/models',ext='model.ckpt'):
+def get_checkpoint(model,base='/opt/models',ext='model.ckpt'):
     model_location = f'{base}/{{}}/{ext}'
     match model:
         case 'PACBIO' | 'mm2':
@@ -44,31 +19,27 @@ def get_model(model,base='/opt/models',ext='model.ckpt'):
         case _:
             return model
 
-#for dir_ in ('output','work'):
-#    for animal,reference in product(config['animals'],config['reference']):
-#        Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
-REGIONS = determine_run_regions()
-
-config.setdefault('Run_name', 'deepvariant')
+config.setdefault('Run_name', 'DV_variant_calling')
 
 if True:
     print('Binding in relevant paths for singularity')
     workflow.singularity_args = f'-B $TMPDIR -B {config["bam_path"]} -B {PurePath(config["reference"]).parent}'
     for preset in config.get('GL_config',[]):
-        if Path(config['GL_config'][preset]).exists():
+        if config['GL_config'][preset]:
             workflow.singularity_args += f' -B {PurePath(config["GL_config"][preset]).parent}'
-    if Path(config['model']).exists():
+    if Path(config['checkpoint']).exists():
         workflow.singularity_args += f' -B {PurePath(config["model"]).parent}'
 
-print(workflow.singularity_args)
+    print(workflow.singularity_args)
 
 def get_regions(region):
     match region:
+        case 'all':
+            return ''
         case 'bed':
-            return '--regions '
-
-        case 'all' | _:
+            return '--regions {region}'
+        case 'x' | _:
             return ''
 
 rule all:
@@ -76,18 +47,16 @@ rule all:
         expand('{name}/{region}.{preset}.vcf.gz',name=config['Run_name'],region=config['regions'],preset=config['GL_config'])
         #expand('{cohort}/{chromosome}.{preset}.vcf.gz{ext}',ext=('','.tbi'),cohort=config['Run_name'],chromosome=get_regions(),preset=config.get("GL_config","WGS"))
 
-        #expand(get_dir('main','{cohort}.{regions}.{preset}.vcf.gz{ext}'),ext=('','.tbi'),cohort=config.get("cohort","cohort"),regions=REGIONS,preset=config.get("GL_config","WGS"))
 
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
 def make_custom_example_arguments(model):
     match model:
-        case 'RNA':
+        case 'RNA' | 'WES':
             return '--channels \'\' --split_skip_reads'
         case 'PACBIO':
             return '--add_hp_channel --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels "0.12"'
         case 'WGS':
             return '--channels "insert_size"'
-
 
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
@@ -131,7 +100,7 @@ rule deepvariant_call_variants:
         temp('{run}/deepvariant/intermediate_results_{sample}_{region}/call_variants_output.tfrecord.gz')
     params:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        model = get_model(config['model'])
+        model = get_checkpoint(config['model'])
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
         mem_mb = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
@@ -177,8 +146,8 @@ rule deepvariant_postprocess:
 
 rule bcftools_scatter:
     input:
-        '{run}/deepvariant/{sample}.{region}.g.vcf.gz'
-        #rules.deepvariant_postprocess.output[1]
+        #'{run}/deepvariant/{sample}.{region}.g.vcf.gz'
+        rules.deepvariant_postprocess.output[1]
     output:
         vcf = '3'#expand('{{run}}/scattered/{{sample}}_{region}.vcf.gz',region=config['regions']),
     params:
@@ -214,7 +183,6 @@ def get_merging_input(wildcards,ext=''):
 
 rule GLnexus_merge:
     input:
-        #vcf = expand('{{run}}/deepvariant/{sample}.{{region}}.g.vcf.gz',sample=config['samples'])
         gvcfs = lambda wildcards: get_merging_input(wildcards),
         tbi = lambda wildcards: get_merging_input(wildcards,'.tbi')
     output:
