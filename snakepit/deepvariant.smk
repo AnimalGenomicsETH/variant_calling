@@ -47,6 +47,9 @@ for dir_ in ('output','work'):
         Path(get_dir(dir_,animal=animal,ref=reference,**config)).mkdir(exist_ok=True)
 
 REGIONS = determine_run_regions()
+
+RUN_NAME = config.get('Run_name','deepvariant')
+
 rule all:
     input:
         expand(get_dir('main','{cohort}.{regions}.{preset}.vcf.gz{ext}'),ext=('','.tbi'),cohort=config.get("cohort","cohort"),regions=REGIONS,preset=config.get("GL_config","WGS"))
@@ -91,7 +94,6 @@ rule deepvariant_make_examples:
         examples = lambda wildcards, output: PurePath(output['examples']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model_args = make_custom_example_arguments(config['model']),
-        _container = lambda wildcards: config['DV_container'],
         regions = lambda wildcards: get_regions(wildcards) 
     threads: 1
     resources:
@@ -99,10 +101,9 @@ rule deepvariant_make_examples:
         walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4:00'),#get_walltime,
         scratch = "1G"
     priority: 50
+    container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
     shell:
         '''
-        singularity exec -B $TMPDIR -B ... \
-        {params._container} \
         /opt/deepvariant/bin/make_examples \
         --mode calling \
         --ref {input.reference[0]} \
@@ -123,18 +124,16 @@ rule deepvariant_call_variants:
         temp('deepvariant/intermediate_results_{sample}/call_variants_output.{callset}.tfrecord.gz')
     params:
         examples = lambda wildcards,input: PurePath(input[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        model = get_model(config['model']),
-        _container = lambda wildcards: config['DV_container'],
+        model = get_model(config['model'])
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
         mem_mb = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
         walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','24:00'),
         scratch = "1G"
     priority: 90
+    container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
     shell:
         '''
-        singularity exec -B $TMPDIR -B ... \
-        {params._container} \
         /opt/deepvariant/bin/call_variants \
         --outfile /{output} \
         --examples /{params.examples} \
@@ -147,21 +146,19 @@ rule deepvariant_postprocess:
         rules.deepvariant_call_variants.output[0],
         gvcf = expand('deepvariant/intermediate_results_{{sample}}/gvcf.{{callset}}.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
     output:
-        vcf = 'deepvariant/{sample}.bwa.{callset}.vcf.gz'),
+        vcf = 'deepvariant/{sample}.bwa.{callset}.vcf.gz',
         gvcf = get_dir('output','{sample}.bwa.{callset}.g.vcf.gz')
     params:
-        gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        _container = lambda wildcards: config['DV_container']
+        gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz')
     threads: 1
     resources:
         mem_mb = config.get('resources',{}).get('postprocess',{}).get('mem_mb',40000),
         walltime = config.get('resources',{}).get('postprocess',{}).get('walltime','4:00'),
         scratch = "1G"
     priority: 100
+    container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
     shell:
         '''
-        singularity exec -B $TMPDIR -B ... \
-        {params._container} \
         /opt/deepvariant/bin/postprocess_variants \
         --ref {input.reference[0]} \
         --infile {input.variants} \
@@ -219,11 +216,8 @@ rule GLnexus_merge:
     params:
         gvcfs = lambda wildcards, input: list('/data' / PurePath(fpath) for fpath in input.vcf),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
-        DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         preset = lambda wildcards: get_GL_config(wildcards.preset),
-        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024,
-        _container = config['GL_container']
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: lambda wildcards: 24 if False == 'all' else 12 #force using 4 threads for bgziping
     resources:
         mem_mb = 8000,
@@ -231,17 +225,16 @@ rule GLnexus_merge:
         walltime = '4:00',
         use_singularity = True
     priority: 25
+    config.get('containers',{}).get('GLnexus','docker://google/deepvariant:latest')
     shell:
         '''
-        ulimit -Sn 4096
-        singularity exec -B $TMPDIR ... \
-        {params._container} \
-        /bin/bash -c " /usr/local/bin/glnexus_cli \
-        --dir {params.DB} \
+        /usr/local/bin/glnexus_cli \
+        --dir $TMPDIR/GLnexus.DB \
         --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
-        {params.gvcfs} \
-        | bcftools view - | bgzip -@ 4 -c > {params.out}"
+        {params.gvcfs} |\
+        bcftools view - | bgzip -@ 4 -c > {params.out}
+
         tabix -p vcf {output[0]}
         '''
