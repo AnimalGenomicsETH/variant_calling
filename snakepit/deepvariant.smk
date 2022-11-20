@@ -17,7 +17,7 @@ def get_checkpoint(model,base='/opt/models',ext='model.ckpt'):
         case 'WGS':
             return model_location.format('wgs')
         case _:
-            return model
+            return config['checkpoint']
 
 
 config.setdefault('Run_name', 'DV_variant_calling')
@@ -205,7 +205,8 @@ rule GLnexus_merge:
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {input.gvcfs} |\
-        bcftools view --threads 4 -o {output[0]} - 
+        bcftools view - |\
+        bgzip -@ 4 -c > {output[0]} 
 
         tabix -p vcf {output[0]}
         '''
