@@ -7,19 +7,6 @@ wildcard_constraints:
     region = r'\w+',
     run = r'\w+'
     
-def get_checkpoint(model,base='/opt/models',ext='model.ckpt'):
-    model_location = f'{base}/{{}}/{ext}'
-    match model:
-        case 'PACBIO' | 'mm2':
-            return model_location.format('pacbio')
-        case 'hybrid':
-            return model_location.format('hybrid_pacbio_illumina')
-        case 'WGS':
-            return model_location.format('wgs')
-        case _:
-            return config['checkpoint']
-
-
 config.setdefault('Run_name', 'DV_variant_calling')
 
 if True:
@@ -93,6 +80,15 @@ rule deepvariant_make_examples:
         --task {wildcards.N}
         '''
 
+def get_checkpoint(model):
+    match model:
+        case 'PACBIO' | 'WGS':
+            return f'/opt/models/{model.lower()}/model.ckpt'
+        case 'hybrid':
+            return '/opt/models/hybrid_pacbio_illumina/model.ckpt'
+        case _:
+            return config['checkpoint']
+
 rule deepvariant_call_variants:
     input:
         expand('{{run}}/deepvariant/intermediate_results_{{sample}}_{{region}}/make_examples.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
@@ -149,7 +145,7 @@ rule bcftools_scatter:
         #'{run}/deepvariant/{sample}.{region}.g.vcf.gz'
         rules.deepvariant_postprocess.output[1]
     output:
-        vcf = '3'#expand('{{run}}/scattered/{{sample}}_{region}.vcf.gz',region=config['regions']),
+        vcf = '3'#lambda wildcards: expand('{{run}}/scattered_{{region}}/{{sample}}_{chromosome}.vcf.gz',chromosome=get_regions(wildcards.region))
     params:
         prefix = '{sample}_',
         out = lambda wildcards,output: 3,#PurePath(output[0]).parent,
@@ -176,6 +172,7 @@ def get_GL_config(preset):
 
 def get_merging_input(wildcards,ext=''):
     #if 'regions_bed' in config: #wildcards.callset == 'regions':
+        #return expand('{{run}}/scattered_{{region}}/{sample}_{{chromosome}}.vcf.gz,sample=config['samples'])
     #    return expand(get_dir('splits',f'{{animal}}_{{region}}.vcf.gz{ext}'),animal=config['animals'],region=wildcards.callset)
     #else:
     return expand('{{run}}/deepvariant/{sample}.{{region}}.g.vcf.gz',sample=config['samples'])
