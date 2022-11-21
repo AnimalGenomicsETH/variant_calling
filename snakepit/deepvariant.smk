@@ -45,6 +45,15 @@ def make_custom_example_arguments(model):
         case 'WGS':
             return '--channels "insert_size"'
 
+def get_regions(region):
+    if region == 'all':
+        return ''
+    elif Path(config['regions'][region]).exists():
+        return ' --regions ' + '"' + " ".join([l.strip() for l in open(config['regions'][region])]) + '"'
+    else:
+        print(config["regions"][region])
+        return ' --regions ' + '"' + f'{" ".join(config["regions"][region])}' + '"'
+
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
@@ -118,8 +127,8 @@ rule deepvariant_postprocess:
         variants = rules.deepvariant_call_variants.output[0],
         gvcf = expand('{{run}}/deepvariant/intermediate_results_{{sample}}_{{region}}/gvcf.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])])
     output:
-        vcf = '{run}/deepvariant/{sample}.{region}.vcf.gz',
-        gvcf = '{run}/deepvariant/{sample}.{region}.g.vcf.gz'
+        vcf = multiext('{run}/deepvariant/{sample}.{region}.vcf.gz','','.tbi'),
+        gvcf = multiext('{run}/deepvariant/{sample}.{region}.g.vcf.gz','','.tbi')
     params:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz')
     threads: 1
@@ -134,20 +143,24 @@ rule deepvariant_postprocess:
         /opt/deepvariant/bin/postprocess_variants \
         --ref {input.reference[0]} \
         --infile {input.variants} \
-        --outfile {output.vcf} \
-        --gvcf_outfile {output.gvcf} \
+        --outfile {output.vcf[0]} \
+        --gvcf_outfile {output.gvcf[0]} \
         --nonvariant_site_tfrecord_path {params.gvcf} \
         --novcf_stats_report
         '''
 
-rule bcftools_scatter:
+checkpoint bcftools_scatter:
     input:
+        gvcfs = expand('{{run}}/deepvariant/{sample}.{{region}}.g.vcf.gz',sample=config['samples'])
         #'{run}/deepvariant/{sample}.{region}.g.vcf.gz'
-        rules.deepvariant_postprocess.output[1]
+        #rules.deepvariant_postprocess.output[1]
     output:
-        vcf = '3'#lambda wildcards: expand('{{run}}/scattered_{{region}}/{{sample}}_{chromosome}.vcf.gz',chromosome=get_regions(wildcards.region))
+        vcf = directory('{run}/scattered_{region}')
+        #vcf = '{run}/scattered_{region}/{sample}_{chromosome}.vcf.gz'
+        #vcf = directory('{{run}}/scattered_{{region}}/{{sample}}')
+        #{chromosome}.vcf.gz',chromosome=get_regions(wildcards.region))
     params:
-        prefix = '{sample}_',
+        prefix = '3',#'{sample}_',
         out = lambda wildcards,output: 3,#PurePath(output[0]).parent,
         scatter = ','.join(['a','b'])
     threads: 2
@@ -156,6 +169,8 @@ rule bcftools_scatter:
         walltime = '60'
     shell:
         '''
+        gvcfs=({input.gvcfs})
+        parallel -j {threads} -u 
         bcftools +scatter {input} --threads {threads} -s {params.scatter} -Oz -o {params.out} -p {params.prefix}
         vcf=({output.vcf})
         parallel -j {threads} -u tabix -fp vcf {{}} ::: ${{vcf[@]}}
@@ -167,15 +182,18 @@ def get_GL_config(preset):
             return 'DeepVariantWGS'
         case 'Unfiltered':
             return 'DeepVariant_unfiltered'
+        case 'DeepVariantWES_MED_DP':
+            return 'DeepVariantWES_MED_DP'
         case _:
             return config['GL_config'][preset]
 
+#NOTE bcftools +scatter will drop the ".g" in the gvcf, but it is still a gvcf
 def get_merging_input(wildcards,ext=''):
-    #if 'regions_bed' in config: #wildcards.callset == 'regions':
-        #return expand('{{run}}/scattered_{{region}}/{sample}_{{chromosome}}.vcf.gz,sample=config['samples'])
-    #    return expand(get_dir('splits',f'{{animal}}_{{region}}.vcf.gz{ext}'),animal=config['animals'],region=wildcards.callset)
-    #else:
-    return expand('{{run}}/deepvariant/{sample}.{{region}}.g.vcf.gz',sample=config['samples'])
+    if get_regions(wildcards.region):
+        checkpoint_output = checkpoints.bcftools_scatter.get(**wildcards).output[0]
+        return expand('{{run}}/scattered_{{region}}/{sample}/{{chromosome}}.vcf.gz{ext}',ext=ext,sample=config['samples'],i=glob_wildcards(os.path.join(checkpoint_output, "{chromosome}.vcf.gz")).chromosome)
+    else:
+        return expand('{{run}}/deepvariant/{sample}.{{region}}.g.vcf.gz{ext}',sample=config['samples'],ext=ext)
     
 
 rule GLnexus_merge:
@@ -183,7 +201,7 @@ rule GLnexus_merge:
         gvcfs = lambda wildcards: get_merging_input(wildcards),
         tbi = lambda wildcards: get_merging_input(wildcards,'.tbi')
     output:
-        multiext('{run}/{region}.{preset}.vcf.gz','','.tbi')
+        multiext('{run}/{region}.{chromosome}.{preset}.vcf.gz','','.tbi')
     params:
         preset = lambda wildcards: get_GL_config(wildcards.preset),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
