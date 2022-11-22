@@ -4,7 +4,7 @@ if 'regions_bed' in config:
     ruleorder: bcftools_scatter > GLnexus_merge
 
 wildcard_constraints:
-    region = r'\w+',
+    region = r'\w+(.)?\w+',
     run = r'\w+'
     
 config.setdefault('Run_name', 'DV_variant_calling')
@@ -20,18 +20,9 @@ if True:
 
     print(workflow.singularity_args)
 
-def get_regions(region):
-    match region:
-        case 'all':
-            return ''
-        case 'bed':
-            return '--regions {region}'
-        case 'x' | _:
-            return ''
-
 rule all:
     input:
-        expand('{name}/{region}.{preset}.vcf.gz',name=config['Run_name'],region=config['regions'],preset=config['GL_config'])
+        expand('{name}/{region}.all.{preset}.vcf.gz',name=config['Run_name'],region=config['regions'],preset=config['GL_config'])
         #expand('{cohort}/{chromosome}.{preset}.vcf.gz{ext}',ext=('','.tbi'),cohort=config['Run_name'],chromosome=get_regions(),preset=config.get("GL_config","WGS"))
 
 
@@ -48,11 +39,10 @@ def make_custom_example_arguments(model):
 def get_regions(region):
     if region == 'all':
         return ''
-    elif Path(config['regions'][region]).exists():
+    elif isinstance(config['regions'][region],str) and Path(config['regions'][region]).exists():
         return ' --regions ' + '"' + " ".join([l.strip() for l in open(config['regions'][region])]) + '"'
     else:
-        print(config["regions"][region])
-        return ' --regions ' + '"' + f'{" ".join(config["regions"][region])}' + '"'
+        return ' --regions ' + '"' + f'{" ".join(map(str,config["regions"][region]))}' + '"'
 
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
@@ -189,7 +179,7 @@ def get_GL_config(preset):
 
 #NOTE bcftools +scatter will drop the ".g" in the gvcf, but it is still a gvcf
 def get_merging_input(wildcards,ext=''):
-    if get_regions(wildcards.region):
+    if get_regions(wildcards.region) and config.get('merge_separately',False):
         checkpoint_output = checkpoints.bcftools_scatter.get(**wildcards).output[0]
         return expand('{{run}}/scattered_{{region}}/{sample}/{{chromosome}}.vcf.gz{ext}',ext=ext,sample=config['samples'],i=glob_wildcards(os.path.join(checkpoint_output, "{chromosome}.vcf.gz")).chromosome)
     else:
