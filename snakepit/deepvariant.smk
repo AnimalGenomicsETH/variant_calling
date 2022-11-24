@@ -45,13 +45,15 @@ def get_regions(region):
         return ' --regions ' + '"' + f'{" ".join(map(str,config["regions"][region]))}' + '"'
 
 #error can be caused by corrupted file, check gzip -t -v
+#NOTE still have the examples info json file, can we remove early?
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
         bam = multiext(config['bam_path']+'{sample}/{sample}.bam','','.bai')
     output:
         examples = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz'),
-        gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz')
+        gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz'),
+        info = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz.example_info.json')
     params:
         examples = lambda wildcards, output: PurePath(output['examples']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
