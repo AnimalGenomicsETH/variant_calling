@@ -18,17 +18,11 @@ if True:
     if Path(config['checkpoint']).exists():
         workflow.singularity_args += f' -B {PurePath(config["model"]).parent}'
 
-    print(workflow.singularity_args)
-
 rule all:
     input:
         expand('{name}/{region}.{preset}.vcf.gz',name=config['Run_name'],region=config['regions'],preset=config['GL_config'])
 
-def expand_if_globbed_samples():
-    samples = glob_wildcards(config["bam_path"] + config["samples"]["glob"])[0]
-    return samples
-
-cohort_samples = config['samples'] if 'glob' not in config['samples'] else expand_if_globbed_samples()
+cohort_samples = config['samples'] if 'glob' not in config['samples'] else glob_wildcards(config["bam_path"] + config["samples"]["glob"]).sample
 
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
 def make_custom_example_arguments(model):
@@ -52,7 +46,7 @@ def get_regions(region):
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
-        bam = multiext(config['bam_path']+'{sample}/{sample}.bam','','.bai')
+        bam = multiext(config['bam_path']+config['bam_name'],'','.bai')
     output:
         examples = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz'),
         gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz'),
