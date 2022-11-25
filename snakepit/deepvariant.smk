@@ -4,7 +4,7 @@ if 'regions_bed' in config:
     ruleorder: bcftools_scatter > GLnexus_merge
 
 wildcard_constraints:
-    #region = r'\w+(.)?\w+',
+    region = r'\w+',
     run = r'\w+'
     
 config.setdefault('Run_name', 'DV_variant_calling')
@@ -23,10 +23,12 @@ if True:
 rule all:
     input:
         expand('{name}/{region}.{preset}.vcf.gz',name=config['Run_name'],region=config['regions'],preset=config['GL_config'])
-        #expand('{cohort}/{chromosome}.{preset}.vcf.gz{ext}',ext=('','.tbi'),cohort=config['Run_name'],chromosome=get_regions(),preset=config.get("GL_config","WGS"))
 
-fake_samples, = glob_wildcards(config["bam_path"] + "{sample}.bam")
-print(fake_samples)
+def expand_if_globbed_samples():
+    samples = glob_wildcards(config["bam_path"] + config["samples"]["glob"])[0]
+    return samples
+
+cohort_samples = config['samples'] if 'glob' not in config['samples'] else expand_if_globbed_samples()
 
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
 def make_custom_example_arguments(model):
@@ -47,7 +49,6 @@ def get_regions(region):
         return ' --regions ' + '"' + f'{" ".join(map(str,config["regions"][region]))}' + '"'
 
 #error can be caused by corrupted file, check gzip -t -v
-#NOTE still have the examples info json file, can we remove early?
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
@@ -145,19 +146,15 @@ rule deepvariant_postprocess:
 
 def get_GL_config(preset):
     match preset:
-        case 'WGS':
-            return 'DeepVariantWGS'
-        case 'Unfiltered':
-            return 'DeepVariant_unfiltered'
-        case 'DeepVariantWES_MED_DP':
-            return 'DeepVariantWES_MED_DP'
+        case 'DeepVariantWGS' | 'DeepVariant_unfiltered' | 'DeepVariantWES_MED_DP':
+            return preset
         case _:
             return config['GL_config'][preset]
 
 rule GLnexus_merge:
     input:
-        gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=config['samples'],allow_missing=True),
-        tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=config['samples'],allow_missing=True)
+        gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=cohort_samples,allow_missing=True),
+        tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=cohort_samples,allow_missing=True)
     output:
         multiext('{run}/{region}.{preset}.vcf.gz','','.tbi')
     params:
