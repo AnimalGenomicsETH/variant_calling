@@ -1,0 +1,44 @@
+## variant calling
+
+reference: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
+bam_path: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/BTA/eQTL/testis/RNA_alignments/normal/dedup_alignment/'
+bam_name: '{sample}/{sample}.bam'
+
+Run_name: 'Testis'
+shards: 15
+
+
+regions:
+  all: ~
+
+model: 'RNA'
+checkpoint: '/cluster/work/pausch/alex/REF_DATA/RNA_DV_models/model.ckpt'
+
+GL_config:
+  DeepVariantWES_MED_DP: ~
+  Unrevised: '/cluster/work/pausch/alex/BSW_analysis/config/GL_DV_raw.yml'
+
+
+containers:
+  DV: '/cluster/work/pausch/alex/software/images/deepvariant_1.4.0.sif'
+  GLnexus: '/cluster/work/pausch/alex/software/images/glnexus_v1.4.1.sif'
+
+
+resources:
+  make_examples:
+    mem_mb: 7500
+    walltime: '4:00'
+  call_variants:
+    threads: 16
+    mem_mb: 750
+    walltime: '4:00'
+  postprocess:
+    mem_mb: 15000
+    walltime: '4:00'
+  merge:
+    threads: 6
+    mem_mb: 7000
+    walltime: '4:00'
+
+samples:
+  glob: '{ignore_1}/{sample}.bam'
