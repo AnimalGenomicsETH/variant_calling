@@ -1,0 +1,77 @@
+## variant calling
+
+## reference fasta
+reference: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
+
+## path location for the bam files
+bam_path: '/nfs/nas12.ethz.ch/fs1201/green_groups_tg_public/data/BTA/eQTL/testis/RNA_alignments/normal/dedup_alignment/'
+
+## extra name scheme to get the actual bam file from the bam_path above.
+## ideally this should just be '{sample}.bam' or something simple, but this allows complex handling
+bam_name: '{sample}/{sample}.bam'
+
+
+## whatever you want the output folder to be named
+Run_name: 'Testis'
+
+## number of chunks to run make_examples on. More shards = more parallel.
+shards: 15
+
+## what regions do you want to run DeepVariant on. All is a catch-all for every contig.
+regions:
+  all: ~
+
+## other regions examples if you want per-chromosome. Explicitly write out all the chromosomes as regions.
+## regions:
+##   1: 1
+##   2: 2
+##   3: 3
+
+## can also pass bed files to be parsed, or a mix of bed files and contig names.
+## regions:
+##   autosomes: 'autosomes.bed'
+##   sex: 'sex_chromosomes.bed'
+##   MT: 'MT'
+
+
+## DeepVariant model. Generally should use 'WGS'
+model: 'WGS'
+checkpoint: '/cluster/work/pausch/alex/REF_DATA/RNA_DV_models/model.ckpt'
+
+## Different GLnexus config files for merging. Can use a default option or specify a path with a yml file. (MUST BE YML NOT YAML).
+GL_config:
+  Unrevised: '/cluster/work/pausch/alex/BSW_analysis/config/GL_DV_raw.yml'
+  DeepVariantWGS: ~
+
+# DeepVariant and GLnexus containers.
+containers:
+  DV: '/cluster/work/pausch/alex/software/images/deepvariant_1.4.0.sif'
+  GLnexus: '/cluster/work/pausch/alex/software/images/glnexus_v1.4.1.sif'
+
+## resources for each step of the pipeline.
+resources:
+  make_examples:
+    mem_mb: 7500
+    walltime: '4:00'
+  call_variants:
+    threads: 16
+    mem_mb: 750
+    walltime: '4:00'
+  postprocess:
+    mem_mb: 15000
+    walltime: '4:00'
+  merge:
+    threads: 6
+    mem_mb: 7000
+    walltime: '4:00'
+
+## can pass a wildcard string to glob all the bam files from the bam_path directory. 
+## here we had to fake the first string so the sample ID was only set to the second occurence of sample (see bam_name).
+samples:
+  glob: '{ignore_1}/{sample}.bam'
+
+## or can pass sample IDs manually
+#samples:
+#  - BSWCHEM12
+#  - BSWCHEM13
+#  - BSWCHEM14
