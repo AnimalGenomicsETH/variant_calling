@@ -10,22 +10,27 @@ rule fastp_filter:
         expand('input/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
     output:
         fastq = expand('fastq/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
+    threads: 4
+    resources:
+        mem_mb = 2500
     shell:
         '''
-        fastp -q 15 -u 40 -g -i {input[0]} -o {output.fastq[0]} -I {input[1]} -O {output.fastq[1]} --json /dev/null --html /dev/null
+        fastp -q 15 -u 40 -g --thread {threads} -i {input[0]} -o {output.fastq[0]} -I {input[1]} -O {output.fastq[1]} --json /dev/null --html /dev/null
         '''
 
 rule bwamem2_index:
     input:
         reference = config['reference']
     output:
-        temp(multiext(config['reference'],'.0123','.amb','.ann','.2bit.64','.pac'))
+        temp(multiext(config['reference'],'.0123','.amb','.ann','.bwt.2bit.64','.pac'))
     threads: 1
     resources:
         mem_mb = 85000
     shell:
         'bwa-mem2 index {input}'
-        
+
+
+#NOTE: markdup -S flag marks supplementary alignments of duplicates as duplicates.
 rule bwamem2_alignment:
     input:
         fastq = rules.fastp_filter.output,
@@ -36,16 +41,16 @@ rule bwamem2_alignment:
     params:
         bwa_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix(''),
         rg="TODO"#"@RG\\tID:{flowcell}.{lane}\\tCN:TUM\\tLB:{sample}\\tPL:illumina\\tPU:{flowcell}:{lane}\\tSM:{sample}",
-    threads: 24
+    threads: 24 #NOTE: samtools pipes are hardcoded using 4 threads (-@ 4).
     resources:
         mem_mb = 4000,
         scratch = '50G',
         walltime = '24:00'
     shell:
         '''
-        bwa-mem2 -Y -t {threads} {input.reference_index} {input.fastq} |\
-        samtools collate -u -O |\
-        samtools fixmate -m -u - - |\
-        samtools sort -T $TMPDIR |\
-        samtools markdup -T $TMPDIR --write-index -f {output.dedup_stats} - {output.bam[0]}
+        bwa-mem2 mem -Y -t {threads} {params.bwa_index} {input.fastq} |\
+        samtools collate -u -O -@ 4 - |\
+        samtools fixmate -m -u -@ 4 - - |\
+        samtools sort -T $TMPDIR -u -@ 4 |\
+        samtools markdup -T $TMPDIR -S -@ 4 --write-index -f {output.dedup_stats} - {output.bam[0]}
         '''
