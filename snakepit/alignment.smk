@@ -1,8 +1,14 @@
 from pathlib import Path, PurePath
 
+def get_bam_extensions():
+    if config.get('cram',False):
+        return ('cram','cram.crai')
+    else:
+        return ('bam','bam.csi')
+
 rule all:
     input:
-        expand('alignments/{sample}.{ext}',sample=config['samples'],ext=('bam','bam.csi'))
+        expand('alignments/{sample}.{ext}',sample=config['samples'],ext=get_bam_extensions())
 
 #ASL: -q 15 -u 40 are both defaults, so not needed.
 rule fastp_filter:
@@ -29,18 +35,17 @@ rule bwamem2_index:
     shell:
         'bwa-mem2 index {input}'
 
-
 #NOTE: markdup -S flag marks supplementary alignments of duplicates as duplicates.
+#NOTE: readgroup as an additional tag is seemingly unused now, so removed.
 rule bwamem2_alignment:
     input:
         fastq = rules.fastp_filter.output,
         reference_index = rules.bwamem2_index.output
     output:
-        bam = multiext('alignments/{sample}.bam','','.csi'),
+        bam = expand('alignments/{sample}.{ext}',ext=get_bam_extensions(),allow_missing=True),
         dedup_stats = 'alignments/{sample}.dedup.stats'
     params:
-        bwa_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix(''),
-        rg="TODO"#"@RG\\tID:{flowcell}.{lane}\\tCN:TUM\\tLB:{sample}\\tPL:illumina\\tPU:{flowcell}:{lane}\\tSM:{sample}",
+        bwa_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix('')
     threads: 24 #NOTE: samtools pipes are hardcoded using 4 threads (-@ 4).
     resources:
         mem_mb = 4000,
