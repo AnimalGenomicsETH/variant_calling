@@ -1,3 +1,5 @@
 reference: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
+#Set to any truthy value and the output will be cram/crai. Otherwise will be bam/csi.
+cram: True
 samples:
  - Apple
