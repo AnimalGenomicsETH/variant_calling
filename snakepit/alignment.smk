@@ -47,7 +47,8 @@ rule bwamem2_alignment:
         bam = expand('alignments/{sample}.{ext}',ext=get_bam_extensions(),allow_missing=True),
         dedup_stats = 'alignments/{sample}.dedup.stats'
     params:
-        bwa_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix('')
+        bwa_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix(''),
+        cram_options = '--output-fmt-option version=3.0 --output-fmt-option normal' if config.get('cram',False) else ''
     threads: 18 #NOTE: samtools pipes are hardcoded using 6 threads (-@ 6).
     resources:
         mem_mb = 4000,
@@ -59,7 +60,7 @@ rule bwamem2_alignment:
         samtools collate -u -O -@ 6 - |\
         samtools fixmate -m -u -@ 6 - - |\
         samtools sort -T $TMPDIR -u -@ 6 |\
-        samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} --reference {input.reference} - {output.bam[0]}
+        samtools markdup -T $TMPDIR -S -@ 6 --write-index {params.cram_options} -f {output.dedup_stats} --reference {input.reference} - {output.bam[0]}
         '''
 
 rule strobealign_index:
