@@ -8,21 +8,23 @@ def get_bam_extensions():
 
 rule all:
     input:
-        expand('alignments/{sample}.{caller}{ext}',sample=config['samples'],ext=get_bam_extensions(),caller=('','strobe.'))
+        expand('alignments/{sample}.{caller}.{ext}',sample=config['samples'],ext=get_bam_extensions(),caller=('bwa','strobe'))
 
-#ASL: -q 15 -u 40 are both defaults, so not needed.
-#--length_required 15
 rule fastp_filter:
     input:
         expand('input/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
     output:
         fastq = expand('fastq/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
+    params:
+        min_quality = config.get('fastp',{}).get('min_quality',15),
+        unqualified = config.get('fastp',{}).get('unqualified',40),
+        min_length  = config.get('fastp',{}).get('min_length',15),
     threads: 4
     resources:
         mem_mb = 2500
     shell:
         '''
-        fastp -q 15 -u 40 -g --length_required 30 --thread {threads} -i {input[0]} -o {output.fastq[0]} -I {input[1]} -O {output.fastq[1]} --json /dev/null --html /dev/null
+        fastp -q {params.min_quality} -u {params.unqualified} -g --length_required {params.min_length} --thread {threads} -i {input[0]} -o {output.fastq[0]} -I {input[1]} -O {output.fastq[1]} --json /dev/null --html /dev/null
         '''
 
 rule bwamem2_index:
@@ -44,8 +46,8 @@ rule bwamem2_alignment:
         reference_index = rules.bwamem2_index.output,
         reference = config['reference']
     output:
-        bam = expand('alignments/{sample}.{ext}',ext=get_bam_extensions(),allow_missing=True),
-        dedup_stats = 'alignments/{sample}.dedup.stats'
+        bam = expand('alignments/{sample}.bwa.{ext}',ext=get_bam_extensions(),allow_missing=True),
+        dedup_stats = 'alignments/{sample}.bwa.dedup.stats'
     params:
         bwa_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix(''),
         cram_options = '--output-fmt-option version=3.0 --output-fmt-option normal' if config.get('cram',False) else ''
@@ -63,6 +65,7 @@ rule bwamem2_alignment:
         samtools markdup -T $TMPDIR -S -@ 6 --write-index {params.cram_options} -f {output.dedup_stats} --reference {input.reference} - {output.bam[0]}
         '''
 
+#ASL: fixed read size (-r) at 150, may need changing for different batches
 rule strobealign_index:
     input:
         reference = config['reference']
