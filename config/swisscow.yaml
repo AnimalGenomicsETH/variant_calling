@@ -1,5 +1,26 @@
+#Must be a writeable directory, as we generate the index files wherever this is.
 reference: '/cluster/work/pausch/alex/REF_DATA/ARS-UCD1.2_Btau5.0.1Y.fa'
+
+
+#Not needed, but more explicit to have.
+#Mostly obvious, but unqualifed is the max % of N-like bases before rejection.
+fastp:
+  min_quality: 15
+  unqualified: 40
+  min_length: 15
+
+#Will align all samples using all of the aligners.
+#For real use, should only be a single value.
+#Currently only supports bwa and strobe.
+aligners:
+  - bwa
+  - strobe
+
 #Set to any truthy value and the output will be cram/crai. Otherwise will be bam/csi.
 cram: True
+
+#List of samples to align.
+#Can edit the aligner code, but assumes fastq files look like
+## input/{sample}.R1.fastq.gz and input/{sample}.R2.fastq.gz
 samples:
  - Apple

@@ -8,17 +8,17 @@ def get_bam_extensions():
 
 rule all:
     input:
-        expand('alignments/{sample}.{caller}.{ext}',sample=config['samples'],ext=get_bam_extensions(),caller=('bwa','strobe'))
+        expand('alignments/{sample}.{caller}.{ext}',sample=config['samples'],ext=get_bam_extensions(),caller=config['aligners'])
 
 rule fastp_filter:
     input:
         expand('input/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
     output:
         fastq = expand('fastq/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
-    params:
+    params: #Fancy way of handling if there is no fastp values in the configfile
         min_quality = config.get('fastp',{}).get('min_quality',15),
         unqualified = config.get('fastp',{}).get('unqualified',40),
-        min_length  = config.get('fastp',{}).get('min_length',15),
+        min_length  = config.get('fastp',{}).get('min_length',15)
     threads: 4
     resources:
         mem_mb = 2500
@@ -38,33 +38,6 @@ rule bwamem2_index:
     shell:
         'bwa-mem2 index {input}'
 
-#NOTE: markdup -S flag marks supplementary alignments of duplicates as duplicates.
-#NOTE: readgroup as an additional tag is seemingly unused now, so removed.
-rule bwamem2_alignment:
-    input:
-        fastq = rules.fastp_filter.output,
-        reference_index = rules.bwamem2_index.output,
-        reference = config['reference']
-    output:
-        bam = expand('alignments/{sample}.bwa.{ext}',ext=get_bam_extensions(),allow_missing=True),
-        dedup_stats = 'alignments/{sample}.bwa.dedup.stats'
-    params:
-        bwa_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix(''),
-        cram_options = '--output-fmt-option version=3.0 --output-fmt-option normal' if config.get('cram',False) else ''
-    threads: 18 #NOTE: samtools pipes are hardcoded using 6 threads (-@ 6).
-    resources:
-        mem_mb = 4000,
-        scratch = '50G',
-        walltime = '4:00'
-    shell:
-        '''
-        bwa-mem2 mem -Y -t {threads} {params.bwa_index} {input.fastq} |\
-        samtools collate -u -O -@ 6 - |\
-        samtools fixmate -m -u -@ 6 - - |\
-        samtools sort -T $TMPDIR -u -@ 6 |\
-        samtools markdup -T $TMPDIR -S -@ 6 --write-index {params.cram_options} -f {output.dedup_stats} --reference {input.reference} - {output.bam[0]}
-        '''
-
 #ASL: fixed read size (-r) at 150, may need changing for different batches
 rule strobealign_index:
     input:
@@ -75,27 +48,38 @@ rule strobealign_index:
     resources:
         mem_mb = 30000
     shell:
-        '''
-        strobealign {input} -i -r 150
-        '''
+        'strobealign {input} -i -r 150'
 
-rule strobealign_alignment:
+def generate_aligner_command(aligner):
+    match aligner:
+        case 'strobe':
+            return 'strobealign {params.strobe_index} {input.fastq} --use-index -t {threads} -r 150'
+        case 'bwa':
+            return 'bwa-mem2 mem -Y -t {threads} {params.bwa_index} {input.fastq}'
+        case _:
+            raise('Unknown aligner')
+
+#NOTE: markdup -S flag marks supplementary alignments of duplicates as duplicates.
+#NOTE: readgroup as an additional tag is seemingly unused now, so removed.
+#This now selects the alignment code using the "generate_aligner_command" function, and then pipes through samtools.
+rule aligner:
     input:
         fastq = rules.fastp_filter.output,
-        reference_index = rules.strobealign_index.output,
+        reference_index = lambda wildcards: rules.strobealign_index.output if wildcards.aligner == 'strobe' else rules.bwamem2_index.output,
         reference = config['reference']
     output:
-        bam = expand('alignments/{sample}.strobe.{ext}',ext=get_bam_extensions(),allow_missing=True),
-        dedup_stats = 'alignments/{sample}.strobe.dedup.stats'
+        bam = expand('alignments/{sample}.{aligner}.{ext}',ext=get_bam_extensions(),allow_missing=True),
+        dedup_stats = 'alignments/{sample}.{aligner}.dedup.stats'
     params:
-        strobe_index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix('')
+        aligner_command = lambda wildcards: generate_aligner_command(wildcards.aligner),
+        index = lambda wildcards, input: PurePath(input.reference_index[0]).with_suffix('')
     threads: 12
     resources:
         mem_mb = 5000,
         scratch = '50G'
     shell:
         '''
-        strobealign {params.strobe_index} {input.fastq} --use-index -t {threads} -r 150 |\
+        {params.aligner_command} |\
         samtools collate -u -O -@ 6 - |\
         samtools fixmate -m -u -@ 6 - - |\
         samtools sort -T $TMPDIR -u -@ 6 |\
