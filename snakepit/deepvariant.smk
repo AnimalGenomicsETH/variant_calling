@@ -1,8 +1,5 @@
 from pathlib import Path,PurePath
 
-if 'regions_bed' in config:
-    ruleorder: bcftools_scatter > GLnexus_merge
-
 wildcard_constraints:
     region = r'\w+',
     run = r'\w+'
@@ -15,7 +12,7 @@ if True:
     for preset in config.get('GL_config',[]):
         if config['GL_config'][preset]:
             workflow.singularity_args += f' -B {PurePath(config["GL_config"][preset]).parent}'
-    if Path(config['checkpoint']).exists():
+    if 'checkpoint' in config and Path(config['checkpoint']).exists():
         workflow.singularity_args += f' -B {PurePath(config["model"]).parent}'
 
 rule all:
@@ -42,11 +39,13 @@ def get_regions(region):
     else:
         return ' --regions ' + '"' + f'{" ".join(map(str,config["regions"][region]))}' + '"'
 
+BAM_EXT = '.bai' if 'bam' in config['bam_name'] else '.crai'
+
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
-        bam = multiext(config['bam_path']+config['bam_name'],'','.bai')
+        bam = multiext(config['bam_path']+config['bam_name'],'',BAM_EXT)
     output:
         examples = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz'),
         gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz'),
