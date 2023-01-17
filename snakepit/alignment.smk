@@ -49,11 +49,11 @@ rule strobealign_index:
         reference = config['reference']
     output:
         temp(config['reference'] + '.sti')
-    threads: 1
+    threads: 4
     resources:
-        mem_mb = 30000
+        mem_mb = 8000
     shell:
-        'strobealign {input} -i -r 150'
+        'strobealign {input} -i -t {threads} -r 150'
 
 def generate_aligner_command(aligner,input,threads):
     index = PurePath(input.reference_index[0]).with_suffix('')
@@ -80,7 +80,7 @@ rule aligner:
         aligner_command = lambda wildcards, input, threads: generate_aligner_command(wildcards.aligner,input,threads)
     threads: 8
     resources:
-        mem_mb = 5000,
+        mem_mb = 3000,
         scratch = '50G',
         walltime = '24:00'
     shell:
