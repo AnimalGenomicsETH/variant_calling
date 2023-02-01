@@ -53,7 +53,7 @@ rule strobealign_index:
     resources:
         mem_mb = 8000
     shell:
-        'strobealign {input} -i -t {threads} -r 150'
+        'strobealign {input} --create-index -t {threads} -r 150'
 
 def generate_aligner_command(aligner,input,threads):
     index = PurePath(input.reference_index[0]).with_suffix('')
