@@ -6,14 +6,9 @@ wildcard_constraints:
     
 config.setdefault('Run_name', 'DV_variant_calling')
 
-if True:
-    print('Binding in relevant paths for singularity')
-    workflow.singularity_args = f'-B $TMPDIR -B {config["bam_path"]} -B {PurePath(config["reference"]).parent}'
-    for preset in config.get('GL_config',[]):
-        if config['GL_config'][preset]:
-            workflow.singularity_args += f' -B {PurePath(config["GL_config"][preset]).parent}'
-    if 'checkpoint' in config and Path(config['checkpoint']).exists():
-        workflow.singularity_args += f' -B {PurePath(config["model"]).parent}'
+if 'binding_paths' in config:
+    for path in config['binding_paths']:
+        workflow.singularity_args += f' -B {path}'
 
 rule all:
     input:
@@ -30,6 +25,8 @@ def make_custom_example_arguments(model):
             return '--add_hp_channel --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels "0.12"'
         case 'WGS':
             return '--channels "insert_size"'
+        case _:
+            return '--channels \'\' --split_skip_reads'
 
 def get_regions(region):
     if region == 'all':
@@ -39,7 +36,7 @@ def get_regions(region):
     else:
         return ' --regions ' + '"' + f'{" ".join(map(str,config["regions"][region]))}' + '"'
 
-BAM_EXT = '.csi' if 'bam' in config['bam_name'] else '.crai'
+BAM_EXT = config.get('bam_index','bai')
 
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
@@ -58,7 +55,7 @@ rule deepvariant_make_examples:
     threads: 1
     resources:
         mem_mb = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
-        walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4:00'),
+        walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4h'),
         scratch = "1G"
     priority: 50
     container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
@@ -84,7 +81,7 @@ def get_checkpoint(model):
         case 'hybrid':
             return '/opt/models/hybrid_pacbio_illumina/model.ckpt'
         case _:
-            return config['checkpoint']
+            return config['model']
 
 rule deepvariant_call_variants:
     input:
@@ -97,7 +94,7 @@ rule deepvariant_call_variants:
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
         mem_mb = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
-        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','24:00'),
+        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','24h'),
         scratch = "1G"
     priority: 90
     container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
@@ -122,7 +119,7 @@ rule deepvariant_postprocess:
     threads: 1
     resources:
         mem_mb = config.get('resources',{}).get('postprocess',{}).get('mem_mb',40000),
-        walltime = config.get('resources',{}).get('postprocess',{}).get('walltime','4:00'),
+        walltime = config.get('resources',{}).get('postprocess',{}).get('walltime','4h'),
         scratch = "1G"
     priority: 100
     container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
@@ -156,7 +153,7 @@ rule GLnexus_merge:
     threads: config.get('resources',{}).get('merge',{}).get('threads',12),
     resources:
         mem_mb = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
-        walltime = config.get('resources',{}).get('merge',{}).get('walltime','4:00'),
+        walltime = config.get('resources',{}).get('merge',{}).get('walltime','4h'),
         scratch = '50G'
     priority: 25
     container: config.get('containers',{}).get('GLnexus','docker://ghcr.io/dnanexus-rnd/glnexus:v1.4.3')
