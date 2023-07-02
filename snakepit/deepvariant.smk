@@ -36,7 +36,7 @@ def get_regions(region):
     else:
         return ' --regions ' + '"' + f'{" ".join(map(str,config["regions"][region]))}' + '"'
 
-BAM_EXT = config.get('bam_index','bai')
+BAM_EXT = config.get('bam_index','.bai')
 
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
