@@ -127,7 +127,8 @@ rule deepvariant_postprocess:
         gvcf = multiext('{run}/deepvariant/{sample}.{region}.g.vcf.gz','','.tbi')
     params:
         variants = lambda wildcards,input: PurePath(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
-        gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz')
+        gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
+        handle_sex_chromosomes = '--haploid_contigs "X,Y" --par_regions_bed "PAR.bed"' if config.get('haploid_sex',False) else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),
@@ -144,6 +145,7 @@ rule deepvariant_postprocess:
         --gvcf_outfile {output.gvcf[0]} \
         --nonvariant_site_tfrecord_path {params.gvcf} \
         --novcf_stats_report \
+        {params.handle_sex_chromosomes} \
         --cpus {threads}
         '''
 
