@@ -2,7 +2,8 @@ from pathlib import Path,PurePath
 
 wildcard_constraints:
     region = r'\w+',
-    run = r'\w+'
+    run = r'\w+',
+    preset = r'|'.join(config['GL_config'])
     
 config.setdefault('Run_name', 'DV_variant_calling')
 
@@ -10,9 +11,12 @@ if 'binding_paths' in config:
     for path in config['binding_paths']:
         workflow._singularity_args += f' -B {path}'
 
-regions = list(map(str,range(1,30))) + ['X','Y','MT','unplaced']
+regions = config.get('regionsz',list(map(str,range(1,30))) + ['X','Y','MT','unplaced'])
 
-ruleorder: deepvariant_postprocess > bcftools_scatter
+if config.get('scatter_merge',True):
+    ruleorder: bcftools_scatter > deepvariant_postprocess
+else:
+    ruleorder: deepvariant_postprocess > bcftools_scatter
 
 rule all:
     input:
@@ -128,7 +132,7 @@ rule deepvariant_postprocess:
     params:
         variants = lambda wildcards,input: PurePath(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        handle_sex_chromosomes = '--haploid_contigs "X,Y" --par_regions_bed "PAR.bed"' if config.get('haploid_sex',False) else ''
+        handle_sex_chromosomes = f'--haploid_contigs "X,Y" --par_regions_bed "{config["haploid_sex"]}"' if 'haploid_sex' in config else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),
@@ -155,7 +159,9 @@ rule bcftools_scatter:
         regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed'
     output:
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True),
-        expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.csi',region=regions,allow_missing=True)
+        expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True)
+    wildcard_constraints:
+        region = "(?!all)"
     params:
         regions = regions,
         _dir = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
@@ -165,11 +171,11 @@ rule bcftools_scatter:
         walltime = '1h'
     shell:
         '''
-        bcftools +scatter {input.gvcf[0]} -o {params._dir} -Oz --threads {threads} --write-index -S {input.regions} -x unplaced --no-version
+        bcftools +scatter {input.gvcf[0]} -o {params._dir} -Oz --threads {threads} -S {input.regions} -x unplaced --no-version
         for R in {params.regions}
         do 
-          mv {params._dir}/$R.vcf.gz {params._dir}.$R.g.vcf.gz
-          mv {params._dir}/$R.vcf.gz.csi {params._dir}.$R.g.vcf.gz.csi
+          bcftools reheader -f /cluster/work/pausch/inputs/ref/BTA/UCD2.0/GCA_002263795.4_ARS-UCD2.0_genomic.fa.fai {params._dir}/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
+          tabix -p vcf {params._dir}.$R.g.vcf.gz
         done
         '''
 
@@ -182,8 +188,6 @@ def get_GL_config(preset):
 
 rule GLnexus_merge:
     input:
-        #gvcfs = expand('{run}/deepvariant/{region}/{sample}.g.vcf.gz',sample=cohort_samples,allow_missing=True),
-        #tbi = expand('{run}/deepvariant/{region}/{sample}.g.vcf.gz.csi',sample=cohort_samples,allow_missing=True)
         gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=cohort_samples,allow_missing=True),
         tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=cohort_samples,allow_missing=True)
     output:
