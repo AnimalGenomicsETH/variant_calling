@@ -156,7 +156,8 @@ rule deepvariant_postprocess:
 rule bcftools_scatter:
     input:
         gvcf = expand(rules.deepvariant_postprocess.output['gvcf'],region='all',allow_missing=True),
-        regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed'
+        regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed',
+        fai = config['reference'] + ".fai"
     output:
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True),
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True)
@@ -174,7 +175,7 @@ rule bcftools_scatter:
         bcftools +scatter {input.gvcf[0]} -o {params._dir} -Oz --threads {threads} -S {input.regions} -x unplaced --no-version
         for R in {params.regions}
         do 
-          bcftools reheader -f /cluster/work/pausch/inputs/ref/BTA/UCD2.0/GCA_002263795.4_ARS-UCD2.0_genomic.fa.fai {params._dir}/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
+          bcftools reheader -f {input.fai} {params._dir}/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
           tabix -p vcf {params._dir}.$R.g.vcf.gz
         done
         '''
