@@ -31,9 +31,13 @@ def make_custom_example_arguments(model):
         case 'RNA' | 'WES':
             return '--channels \'\' --split_skip_reads'
         case 'PACBIO':
-            return '--add_hp_channel --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels "0.12"'
+            return '--alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels "0.12" --trim_reads_for_pileup'
         case 'WGS':
             return '--channels "insert_size"'
+        case 'ONT_R104':
+            return '--alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_snps "0.08" --vsc_min_fraction_indels "0.12" --trim_reads_for_pileup'
+        case 'MASSEQ':
+            return '--alt_aligned_pileup "diff_channels" --max_reads_per_partition 0 --min_mapping_quality 1 --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels 0.12 --trim_reads_for_pileup --max_reads_for_dynamic_bases_per_region "1500"'
         case _:
             return '--channels \'\' --split_skip_reads'
 
@@ -202,17 +206,13 @@ rule GLnexus_merge:
         walltime = config.get('resources',{}).get('merge',{}).get('walltime','4h'),
         scratch = '50G'
     priority: 25
-    container: config.get('containers',{}).get('GLnexus','docker://ghcr.io/dnanexus-rnd/glnexus:v1.4.3')
     shell:
         '''
-        /usr/local/bin/glnexus_cli \
+        glnexus_cli \
         --dir $TMPDIR/GLnexus.DB \
         --config {params.preset} \
         --threads {threads} \
         --mem-gbytes {params.mem} \
         {input.gvcfs} |\
-        bcftools view - |\
-        bgzip -@ 8 -c > {output[0]} 
-
-        tabix -p vcf {output[0]}
+        bcftools view -@ {threads} -W=tbi {output[0]} 
         '''
