@@ -27,19 +27,18 @@ cohort_samples = config['samples'] if 'glob' not in config['samples'] else glob_
 
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
 def make_custom_example_arguments(model):
+    common_long_read_options = '--alt_aligned_pileup "diff_channels" --parse_sam_aux_fields --partition_size "25000" --phase_reads --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" '
     match model:
-        case 'RNA' | 'WES':
-            return '--channels \'\' --split_skip_reads'
-        case 'PACBIO':
-            return '--alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels "0.12" --trim_reads_for_pileup'
         case 'WGS':
-            return '--channels "insert_size"'
-        case 'ONT_R104':
-            return '--alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_snps "0.08" --vsc_min_fraction_indels "0.12" --trim_reads_for_pileup'
+            return '--channel_list BASE_CHANNELS,insert_size'
+        case 'PACBIO':
+            return common_long_read_options + '--max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
         case 'MASSEQ':
-            return '--alt_aligned_pileup "diff_channels" --max_reads_per_partition 0 --min_mapping_quality 1 --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels 0.12 --trim_reads_for_pileup --max_reads_for_dynamic_bases_per_region "1500"'
-        case _:
-            return '--channels \'\' --split_skip_reads'
+            return common_long_read_options + '--max_reads_per_partition 0 --min_mapping_quality 1 --pileup_image_width "199" --max_reads_for_dynamic_bases_per_region "1500"'
+        case 'ONT_R104':
+            return common_long_read_options + '--max_reads_per_partition "600" --min_mapping_quality "5" --pileup_image_width "99" --vsc_min_fraction_snps "0.08"'
+        case 'RNA' | 'WES' | _:
+            return '--channel_list BASE_CHANNELS --split_skip_reads'
 
 def get_regions(region):
     if region == 'all':
@@ -55,7 +54,6 @@ def get_regions(region):
 
 BAM_EXT = config.get('bam_index','.bai')
 
-#error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
