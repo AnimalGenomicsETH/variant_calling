@@ -11,6 +11,8 @@ if 'binding_paths' in config:
     for path in config['binding_paths']:
         workflow._singularity_args += f' -B {path}'
 
+#TODO: generalise regions from input
+#lean more on config and force users to be explicit, then less room for errors
 regions = config.get('regionsz',list(map(str,range(1,30))) + ['X','Y','MT','unplaced'])
 
 if config.get('scatter_merge',True):
@@ -26,13 +28,14 @@ rule all:
 cohort_samples = config['samples'] if 'glob' not in config['samples'] else glob_wildcards(config["bam_path"] + config["samples"]["glob"]).sample
 
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
-def make_custom_example_arguments(model):
+def make_custom_example_arguments(model,small=True): #TODO: allow switching on/off small model
     common_long_read_options = '--alt_aligned_pileup "diff_channels" --parse_sam_aux_fields --partition_size "25000" --phase_reads --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" '
+    small_model = '--small_model_snp_gq_threshold 25 --small_model_indel_gq_threshold 30 --small_model_vaf_context_window_size 51 ' #TODO: this does not work for ONTr10
     match model:
         case 'WGS':
-            return '--channel_list BASE_CHANNELS,insert_size'
+            return small_model + '--channel_list BASE_CHANNELS,insert_size'
         case 'PACBIO':
-            return common_long_read_options + '--max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
+            return common_long_read_options + small_model '--max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
         case 'MASSEQ':
             return common_long_read_options + '--max_reads_per_partition 0 --min_mapping_quality 1 --pileup_image_width "199" --max_reads_for_dynamic_bases_per_region "1500"'
         case 'ONT_R104':
@@ -90,12 +93,14 @@ rule deepvariant_make_examples:
         --task {wildcards.N}
         '''
 
-def get_checkpoint(model):
+#TODO: need to update models?
+def get_checkpoint(model,small=True):
+    path = f'/opt/{"small" if small else ""}models/'
     match model:
-        case 'PACBIO' | 'WGS':
-            return f'/opt/models/{model.lower()}'
+        case 'PACBIO' | 'MASSEQ' | 'WGS' | 'ONT_R104' :
+            return path + model.lower()
         case 'hybrid':
-            return '/opt/models/hybrid_pacbio_illumina'
+            return path + 'hybrid_pacbio_illumina'
         case _:
             return config['model']
 
@@ -158,7 +163,7 @@ rule deepvariant_postprocess:
 rule bcftools_scatter:
     input:
         gvcf = expand(rules.deepvariant_postprocess.output['gvcf'],region='all',allow_missing=True),
-        regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed',
+        regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed', # TODO: need to handle this for different references
         fai = config['reference'] + ".fai"
     output:
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True),
@@ -182,6 +187,7 @@ rule bcftools_scatter:
         done
         '''
 
+# see https://github.com/dnanexus-rnd/GLnexus/pull/310
 def get_GL_config(preset):
     match preset:
         case 'DeepVariantWGS' | 'DeepVariant_unfiltered' | 'DeepVariantWES_MED_DP':
