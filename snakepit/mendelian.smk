@@ -10,7 +10,7 @@ def read_trios(ext='.{chr}.vcf.gz'):
         targets.append(get_dir('mendel',f'{"_".join(row)}{ext}'))
     return targets
 
-ruleorder: remove_tigs > GLnexus_merge_families
+
 
 rule GLnexus_merge_families:
     input:

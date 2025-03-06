@@ -1,15 +1,3 @@
-from pathlib import PurePath
-from itertools import product
-
-localrules: tabulate_isec
-
-rule all:
-    input:
-        'merfin_isec.upset',
-        'merfin_filtering.csv',
-        expand('merfin/{sample}_merfin.intersections',sample=config['samples']),
-        expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
-
 def get_fastq(sample):
     return (str(PurePath(config['fastq']) / f'{sample}_R{N}.fastq.gz') for N in (1,2))
 
@@ -190,6 +178,7 @@ rule tabulate_isec:
         'merfin_isec.upset'
     params:
         samples = list(config['samples'].keys())
+    localrule: True
     shell:
         '''
         cat {input} > {output}

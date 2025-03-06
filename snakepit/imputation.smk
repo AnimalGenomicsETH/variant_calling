@@ -1,74 +1,36 @@
-from pathlib import PurePath
-
-rule all:
+rule bcftools_scatter:
     input:
-        str(PurePath(config['imputed']) / "cohort.autosomes.shapeit.vcf.gz")
-        
-rule beagle_imputation:
-    input:
-        str(PurePath(config['vcfs']) / "cohort.{chromosome}.vcf.gz")
+        gvcf = 'variants/contigs.Unrevised.vcf.gz'
     output:
-        str(PurePath(config['imputed']) / "cohort.{chromosome}.beagle.vcf.gz")
+        expand('variants/contigs/{region}.vcf.gz',region=regions,allow_missing=True),
+        expand('variants/contigs/{region}.vcf.gz.csi',region=regions,allow_missing=True)
     params:
-        lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix('')
-    threads: 12
+        _dir = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
+    threads: 2
     resources:
-        mem_mb = 3500,
-        walltime = '4:00'
+        mem_mb = 2500,
+        walltime = '4h'
     shell:
         '''
-        java -jar -Xss25m -Xmx40G {config[beagle]} gl={input} nthreads={threads} out={params}
-        tmp_file=$(mktemp .XXXXXX)
-        mv {output} $tmp_file
-        bcftools reheader -f {config[reference]} -o {output} $tmp_file
-        tabix -fp vcf {output}
+        bcftools +scatter {input.gvcf} -o {params._dir} -Oz --threads {threads} --write-index -S <(cut -f 1 all_regions.bed) --no-version
         '''
 
-#rule prepare_genetic_maps:
-    output:
-        str(PurePath(config['gmaps']) / "{chromosome}.ARS.gmap.gz")
-    shell:
-        '''
-        for i in {{1..29}};
-        do
-          echo -e "pos\\tchr\\tcM" > ${{i}}.ARS.gmap; awk -v a=$i -F, '$1==a {{print sprintf("%.0f",$3*1000000)"\\t"$1"\\t"$5}}' {config[genetic_map]} | awk '$3=="NA"{$3=prev}{prev=$3}1' >> ${i}.ARS.gmap;
-        done
-        '''
-#for i in {2..28}; do awk -i inplace '$3=="NA"{$3=prev}{prev=$3}1' ${i}.ARS.gmap; done
-
-
-rule shapeit_imputation:
+rule beagle4_imputation:
     input:
-        vcf = str(PurePath(config['vcfs']) / "cohort.{chromosome}.vcf.gz"),
-        gmap = str(PurePath(config['gmaps']) / "{chromosome}.ARS.gmap.gz")
+        vcf = 'variants/contigs/{region}.vcf.gz',
+        fai = f"{config['reference']}.fai"
     output:
-        str(PurePath(config['imputed']) / "cohort.{chromosome}.shapeit.vcf.gz")
-    threads: 4
+        multiext('variants/contigs/{region}.beagle4.vcf.gz','','.tbi')
+    threads: 6
     resources:
-        mem_mb = 1000,
-        walltime = '30'
+        mem_mb = 4000,
+        walltime = lambda wildcards, input: '24h' if input.size_mb > 50 else '4h'
     shell:
         '''
-        /cluster/work/pausch/alex/software/shapeit4/bin/shapeit4.2 --input {input} --map {input.gmap} --region {wildcards.chromosome} --output {output} --thread {threads} --sequencing --mcmc-iterations 10b,1p,1b,1p,1b,1p,1b,1p,10m
-        tmp_file=$(mktemp .XXXXXX)
-        mv {output} $tmp_file
-        bcftools reheader -f {config[reference]} -o {output} $tmp_file
-        rm $tmp_file
-        tabix -fp vcf {output}
+        #add ne for popsize
+        java -jar -Xss25m -Xmx60G /cluster/work/pausch/alex/software/beagle.27Jan18.7e1.jar gl={input} nthreads={threads} out=$TMPDIR/imputed.vcf.gz
+        bcftools reheader -f {input.fai} -o {output[0]} $TMPDIR/imputed.vcf.gz
+        tabix -fp vcf {output[0]}
         '''
 
-
-rule bcftools_concat:
-    input:
-        (str(PurePath(config['imputed']) / f"cohort.{chromosome}.{{imputer}}.vcf.gz") for chromosome in range(1,30))
-    output:
-        multiext(str(PurePath(config['imputed']) / "cohort.autosomes.{imputer}.vcf.gz"),'','.tbi')
-    threads: 4
-    resources:
-        mem_mb = 500,
-        walltime = '10'
-    shell:
-        '''
-        bcftools concat --threads {threads} -O z -o {output[0]} {input}
-        tabix -p vcf {output[0]}
-        '''
+#beagle5

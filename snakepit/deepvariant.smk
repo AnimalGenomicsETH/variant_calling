@@ -1,25 +1,3 @@
-from pathlib import Path,PurePath
-
-wildcard_constraints:
-    region = r'\w+',
-    run = r'\w+'
-    
-config.setdefault('Run_name', 'DV_variant_calling')
-
-if 'binding_paths' in config:
-    for path in config['binding_paths']:
-        workflow._singularity_args += f' -B {path}'
-
-regions = list(map(str,range(1,30))) + ['X','Y','MT','unplaced']
-
-ruleorder: deepvariant_postprocess > bcftools_scatter
-
-rule all:
-    input:
-        expand('{name}/{region}.{preset}.vcf.gz',name=config['Run_name'],region=regions,preset=config['GL_config']),
-        expand('{name}/{region}.{preset}.vcf.gz.tbi',name=config['Run_name'],region=regions,preset=config['GL_config'])
-
-cohort_samples = config['samples'] if 'glob' not in config['samples'] else glob_wildcards(config["bam_path"] + config["samples"]["glob"]).sample
 
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
 def make_custom_example_arguments(model):
@@ -63,25 +41,22 @@ rule deepvariant_make_examples:
         regions = lambda wildcards: get_regions(wildcards.region) 
     threads: 1
     resources:
-        mem_mb = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
-        walltime = config.get('resources',{}).get('make_examples',{}).get('walltime','4h'),
-        scratch = "1G",
-        storage_load = 1
-    priority: 50
+        mem_mb_per_cpu = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
+        runtime = config.get('resources',{}).get('make_examples',{}).get('runtime','4h'),
     container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
     shell:
         '''
-        /opt/deepvariant/bin/make_examples \
-        --mode calling \
-        --ref {input.reference[0]} \
-        --include_med_dp \
-        --reads {input.bam[0]} \
-        --examples {params.examples} \
-        --gvcf {params.gvcf} \
-        --sample_name {wildcards.sample} \
-        {params.regions} \
-        {params.model_args} \
-        --task {wildcards.N}
+/opt/deepvariant/bin/make_examples \
+--mode calling \
+--ref {input.reference[0]} \
+--include_med_dp \
+--reads {input.bam[0]} \
+--examples {params.examples} \
+--gvcf {params.gvcf} \
+--sample_name {wildcards.sample} \
+{params.regions} \
+{params.model_args} \
+--task {wildcards.N}
         '''
 
 def get_checkpoint(model):
@@ -104,17 +79,15 @@ rule deepvariant_call_variants:
         model = get_checkpoint(config['model'])
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
-        mem_mb = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
-        walltime = config.get('resources',{}).get('call_variants',{}).get('walltime','24h'),
-        scratch = "1G"
-    priority: 90
+        mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
+        runtime = config.get('resources',{}).get('call_variants',{}).get('runtime','24h'),
     container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
     shell:
         '''
-        /opt/deepvariant/bin/call_variants \
-        --outfile {output} \
-        --examples {params.examples} \
-        --checkpoint {params.model}
+/opt/deepvariant/bin/call_variants \
+--outfile {output} \
+--examples {params.examples} \
+--checkpoint {params.model}
         '''
 
 rule deepvariant_postprocess:
@@ -130,21 +103,19 @@ rule deepvariant_postprocess:
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz')
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
-        mem_mb = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),
-        walltime = config.get('resources',{}).get('postprocess',{}).get('walltime','4h'),
-        scratch = "1G"
-    priority: 100
+        mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),
+        runtime = config.get('resources',{}).get('postprocess',{}).get('runtime','4h'),
     container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
     shell:
         '''
-        /opt/deepvariant/bin/postprocess_variants \
-        --ref {input.reference[0]} \
-        --infile {params.variants} \
-        --outfile {output.vcf[0]} \
-        --gvcf_outfile {output.gvcf[0]} \
-        --nonvariant_site_tfrecord_path {params.gvcf} \
-        --novcf_stats_report \
-        --cpus {threads}
+/opt/deepvariant/bin/postprocess_variants \
+--ref {input.reference[0]} \
+--infile {params.variants} \
+--outfile {output.vcf[0]} \
+--gvcf_outfile {output.gvcf[0]} \
+--nonvariant_site_tfrecord_path {params.gvcf} \
+--novcf_stats_report \
+--cpus {threads}
         '''
 
 rule bcftools_scatter:
@@ -159,16 +130,16 @@ rule bcftools_scatter:
         _dir = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
     threads: 2
     resources:
-        mem_mb = 2500,
-        walltime = '1h'
+        mem_mb_per_cpu = 2500,
+        runtime = '1h'
     shell:
         '''
-        bcftools +scatter {input.gvcf[0]} -o {params._dir} -Oz --threads {threads} --write-index -S {input.regions} -x unplaced --no-version
-        for R in {params.regions}
-        do 
-          mv {params._dir}/$R.vcf.gz {params._dir}.$R.g.vcf.gz
-          mv {params._dir}/$R.vcf.gz.csi {params._dir}.$R.g.vcf.gz.csi
-        done
+bcftools +scatter {input.gvcf[0]} -o {params._dir} -Oz --threads {threads} --write-index -S {input.regions} -x unplaced --no-version
+for R in {params.regions}
+do 
+    mv {params._dir}/$R.vcf.gz {params._dir}.$R.g.vcf.gz
+    mv {params._dir}/$R.vcf.gz.csi {params._dir}.$R.g.vcf.gz.csi
+done
         '''
 
 def get_GL_config(preset):
@@ -191,21 +162,19 @@ rule GLnexus_merge:
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
     threads: config.get('resources',{}).get('merge',{}).get('threads',12),
     resources:
-        mem_mb = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
-        walltime = config.get('resources',{}).get('merge',{}).get('walltime','4h'),
-        scratch = '50G'
-    priority: 25
+        mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
+        runtime = config.get('resources',{}).get('merge',{}).get('runtime','4h'),
     container: config.get('containers',{}).get('GLnexus','docker://ghcr.io/dnanexus-rnd/glnexus:v1.4.3')
     shell:
         '''
-        /usr/local/bin/glnexus_cli \
-        --dir $TMPDIR/GLnexus.DB \
-        --config {params.preset} \
-        --threads {threads} \
-        --mem-gbytes {params.mem} \
-        {input.gvcfs} |\
-        bcftools view - |\
-        bgzip -@ 8 -c > {output[0]} 
+/usr/local/bin/glnexus_cli \
+--dir $TMPDIR/GLnexus.DB \
+--config {params.preset} \
+--threads {threads} \
+--mem-gbytes {params.mem} \
+{input.gvcfs} |\
+bcftools view - |\
+bgzip -@ 8 -c > {output[0]} 
 
-        tabix -p vcf {output[0]}
+tabix -p vcf {output[0]}
         '''
