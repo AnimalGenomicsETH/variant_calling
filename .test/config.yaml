@@ -1,0 +1,37 @@
+
+
+
+reference: 'ARS_UCD2.0.fasta'
+
+alignment_metadata: 'alignments.csv'
+
+
+## number of chunks to run make_examples on. More shards = more parallel.
+shards: 24
+
+## whatever you want the output folder to be named
+run_name: 'test'
+
+## what regions do you want to run DeepVariant on. All is a catch-all for every contig.
+regions:
+  all: ~
+
+## DeepVariant model. Generally should use 'WGS'
+model: 'WGS'
+checkpoint: '/cluster/work/pausch/alex/REF_DATA/RNA_DV_models/model.ckpt'
+
+#TODO: should we just hardcode the non-filter version
+#TODO: update using Kishwar's change
+GL_config:
+  Unrevised: '/cluster/work/pausch/alex/BSW_analysis/config/GL_DV_raw.yml'
+  DeepVariantWGS: ~
+
+# Filtering TODO: finish
+filtering:
+  basic: '-i ,,, ... '
+
+# DeepVariant and GLnexus containers.
+#TODO: update to v1.8
+containers:
+  DV: '/cluster/work/pausch/alex/software/images/deepvariant_1.4.0.sif'
+  GLnexus: '/cluster/work/pausch/alex/software/images/glnexus_v1.4.1.sif'

@@ -11,6 +11,15 @@ def make_custom_example_arguments(model):
         case _:
             return '--channels \'\' --split_skip_reads'
 
+def get_checkpoint(model):
+    match model:
+        case 'PACBIO' | 'WGS':
+            return f'/opt/models/{model.lower()}'
+        case 'hybrid':
+            return '/opt/models/hybrid_pacbio_illumina'
+        case _:
+            return config['model']
+
 def get_regions(region):
     if region == 'all':
         return ''
@@ -25,11 +34,16 @@ def get_regions(region):
 
 BAM_EXT = config.get('bam_index','.bai')
 
+def get_sample_bam_path(wildcards):
+    # query alignment_metadata for path?
+    # and index
+    return ''
+
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
-        bam = multiext(config['bam_path']+config['bam_name'],'',BAM_EXT)
+        bam =  get_sample_bam_path
     output:
         examples = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz'),
         gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz'),
@@ -59,15 +73,6 @@ rule deepvariant_make_examples:
 --task {wildcards.N}
         '''
 
-def get_checkpoint(model):
-    match model:
-        case 'PACBIO' | 'WGS':
-            return f'/opt/models/{model.lower()}'
-        case 'hybrid':
-            return '/opt/models/hybrid_pacbio_illumina'
-        case _:
-            return config['model']
-
 rule deepvariant_call_variants:
     input:
         examples = expand('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz',sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
@@ -75,7 +80,7 @@ rule deepvariant_call_variants:
     output:
         temp('{run}/deepvariant/intermediate_results_{sample}_{region}/call_variants_output-00000-of-00001.tfrecord.gz')
     params:
-        examples = lambda wildcards,input: PurePath(input['examples'][0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
+        examples = lambda wildcards, input: PurePath(input['examples'][0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model = get_checkpoint(config['model'])
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',12)
     resources:
@@ -118,10 +123,11 @@ rule deepvariant_postprocess:
 --cpus {threads}
         '''
 
+#can we scatter off of a better BED file?
 rule bcftools_scatter:
     input:
         gvcf = expand(rules.deepvariant_postprocess.output['gvcf'],region='all',allow_missing=True),
-        regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed'
+        regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed' # fix to be general
     output:
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True),
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.csi',region=regions,allow_missing=True)
@@ -142,6 +148,7 @@ do
 done
         '''
 
+# add default to repo under config
 def get_GL_config(preset):
     match preset:
         case 'DeepVariantWGS' | 'DeepVariant_unfiltered' | 'DeepVariantWES_MED_DP':
@@ -153,8 +160,8 @@ rule GLnexus_merge:
     input:
         #gvcfs = expand('{run}/deepvariant/{region}/{sample}.g.vcf.gz',sample=cohort_samples,allow_missing=True),
         #tbi = expand('{run}/deepvariant/{region}/{sample}.g.vcf.gz.csi',sample=cohort_samples,allow_missing=True)
-        gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=cohort_samples,allow_missing=True),
-        tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=cohort_samples,allow_missing=True)
+        gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=samples,allow_missing=True),
+        tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=samples,allow_missing=True)
     output:
         multiext('{run}/{region}.{preset}.vcf.gz','','.tbi')
     params:

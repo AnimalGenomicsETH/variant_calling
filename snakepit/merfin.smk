@@ -118,8 +118,8 @@ rule bcftools_sort:
         
 rule tabulate_results:
     input:
-        vcfs = expand('vcfs/{sample}.{vcf}.vcf.gz',sample=config['samples'],vcf=config['vcfs']),
-        merfins = expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])
+        vcfs = expand('vcfs/{sample}.{vcf}.vcf.gz',sample=samples,vcf=config['vcfs']),
+        merfins = expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf.gz',sample=samples,vcf=config['vcfs'],fitted=config['modes'])
     output:
         filtering = 'merfin_filtering.csv',
         genotypes = 'merfin_genotypes.csv'
@@ -161,7 +161,7 @@ rule bcftools_isec:
         vcfs = expand('vcfs/{{sample}}.{vcf}.vcf.gz',vcf=config['vcfs']),
         filtered = expand('merfin/{{sample}}.{vcf}.merfin.{fitted}.filter.vcf.gz',vcf=config['vcfs'],fitted=config['modes'])
     output:
-        'merfin/{sample}_merfin.intersections'
+        'merfin/{vcf_1}_{vcf_2}.{sample}_merfin.{fitted}.intersections'
     threads: 4
     resources:
         mem_mb = 1000,
@@ -173,11 +173,9 @@ rule bcftools_isec:
 
 rule tabulate_isec:
     input:
-        expand('merfin/{sample}_merfin.intersections',sample=config['samples'])
+        expand(rules.bcftools_isec.output,sample=samples,fitted='fit')
     output:
         'merfin_isec.upset'
-    params:
-        samples = list(config['samples'].keys())
     localrule: True
     shell:
         '''

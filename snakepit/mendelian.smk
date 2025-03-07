@@ -5,20 +5,15 @@ def read_trios(ext='.{chr}.vcf.gz'):
     df = pd.read_csv(config['trios'])
     df.fillna('missing',inplace=True)
 
-    targets = []
-    for _, row in df.iterrows():
-        targets.append(get_dir('mendel',f'{"_".join(row)}{ext}'))
-    return targets
-
-
+#    targets.append('mendelian/{"_".join(row)}{ext}')
 
 rule GLnexus_merge_families:
     input:
-        offspring = get_dir('output','{offspring}.bwa.{chr}.g.vcf.gz'),
-        sire  = lambda wildcards: get_dir('output','{sire}.bwa.{chr}.g.vcf.gz') if wildcards.sire != 'missing' else [],
-        dam = lambda wildcards: get_dir('output','{dam}.bwa.{chr}.g.vcf.gz') if wildcards.dam != 'missing' else []
+        offspring = 'output/{offspring}.bwa.{chr}.g.vcf.gz',
+        sire  = lambda wildcards: 'output/{sire}.bwa.{chr}.g.vcf.gz' if wildcards.sire != 'missing' else [],
+        dam = lambda wildcards: 'output/{dam}.bwa.{chr}.g.vcf.gz' if wildcards.dam != 'missing' else []
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
@@ -47,9 +42,9 @@ rule GLnexus_merge_families:
 
 rule remove_tigs:
     input:
-        multiext(get_dir('mendel','{offspring}_{sire}_{dam}.all.vcf.gz'),'','.tbi')
+        multiext('mendelian/{offspring}_{sire}_{dam}.all.vcf.gz','','.tbi')
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.autosomes.vcf.gz')
+        'mendelian/{offspring}_{sire}_{dam}.autosomes.vcf.gz'
     params:
         regions = ','.join(map(str,range(1,30)))
     threads: 2
@@ -72,7 +67,7 @@ rule tabix:
 
 rule rtg_pedigree:
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.ped')
+        'mendelian/{offspring}_{sire}_{dam}.ped'
     shell:
         '''
         FILE={output}
@@ -90,11 +85,12 @@ cat <<EOM >$FILE
 EOM
         '''
 
+#TODO: fix singularity if needed
 rule rtg_format:
     input:
         ref = lambda wildcards: multiext(config['reference'],'','.fai')
     output:
-        sdf = get_dir('main','ARS.sdf')
+        sdf = 'main/ARS.sdf'
     params:
         singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/,.:/data',tmp_bind=False,output_bind=False,work_bind=False),
         ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
@@ -107,12 +103,12 @@ rule rtg_format:
 
 rule rtg_mendelian_concordance:
     input:
-        sdf = get_dir('main','ARS.sdf'),
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz'),
-        pedigree = get_dir('mendel','{offspring}_{sire}_{dam}.ped')
+        sdf = rules.rtg_format.output['sdf'],
+        vcf = 'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz',
+        pedigree = 'mendelian/{offspring}_{sire}_{dam}.ped'
     output:
-        temp = temp(get_dir('mendel','filled_{offspring}_{sire}_{dam}.{chr}.vcf.gz')),
-        results = multiext(get_dir('mendel','{offspring}_{sire}_{dam}.{chr}'),'.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
+        temp = temp('mendelian/filled_{offspring}_{sire}_{dam}.{chr}.vcf.gz'),
+        results = multiext('mendelian/{offspring}_{sire}_{dam}.{chr}','.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
     params:
         vcf_in = lambda wildcards, input, output: '/data' / PurePath(input.vcf) if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data' / PurePath(output.temp),
         vcf_annotated = lambda wildcards, output: '/data' / PurePath(output.results[0]),
@@ -133,10 +129,10 @@ rule rtg_mendelian_concordance:
 
 rule rtg_vcfeval:
     input:
-        sdf = get_dir('main','ARS.sdf'),
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        sdf = rules.rtg_format.output['sdf'],
+        vcf = 'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        logs = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcfeval.log')
+        logs = 'mendelian/{offspring}_{sire}_{dam}.{chr}.vcfeval.log'
     params:
         samples = lambda wildcards: f'{wildcards.sire if wildcards.sire != "missing" else wildcards.dam},{wildcards.offspring}',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
@@ -153,9 +149,9 @@ rule rtg_vcfeval:
 
 rule bcftools_mendelian:
     input:
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        vcf = 'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        logs = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.mendelian.log')
+        logs = 'mendelian/{offspring}_{sire}_{dam}.{chr}.mendelian.log'
     params:
         sample = '{dam},{sire},{offspring}'
     threads: 1
@@ -169,9 +165,9 @@ rule bcftools_mendelian:
 
 rule bcftools_count:
     input:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.count')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.count'
     shell:
         '''
         tabix -fp vcf {input}
@@ -180,9 +176,9 @@ rule bcftools_count:
 
 rule genotype_count:
     input:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.genotypes')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.genotypes'
     shell:
         '''
         bcftools annotate -x INFO,^FORMAT/GT {input} | grep -oP "([\.|\d]/[/.|\d])" | sort | uniq -c > {output}
@@ -193,7 +189,7 @@ rule mendel_summary:
         logs = read_trios('.{chr}.mendelian.log'),
         stats = read_trios('.{chr}.count')
     output:
-        get_dir('main','mendel.{caller}.{chr}.summary.df')
+        'mendelian/{caller}.{chr}.summary.df'
     run:
         import pandas as pd
 
@@ -219,4 +215,3 @@ rule mendel_summary:
         df['duo'] = (df == 'missing').any(axis=1)
         df['caller'] = wildcards.caller
         df.to_csv(output[0],index=False)
-

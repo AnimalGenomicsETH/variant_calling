@@ -1,4 +1,4 @@
-rule bcftools_scatter:
+rule bcftools_scatter_X:
     input:
         gvcf = 'variants/contigs.Unrevised.vcf.gz'
     output:
