@@ -8,12 +8,23 @@ rule bcftools_scatter_X:
         _dir = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
     threads: 2
     resources:
-        mem_mb = 2500,
-        walltime = '4h'
+        mem_mb_per_cpu = 2500,
+        runtime = '4h'
     shell:
         '''
         bcftools +scatter {input.gvcf} -o {params._dir} -Oz --threads {threads} --write-index -S <(cut -f 1 all_regions.bed) --no-version
         '''
+
+#TODO: can we chain filtering steps?
+rule bcftools_filter:
+    input:
+        vcf = lambda wildcards: multiext('{run}/{region}.Unrevised.vcf.gz','','.tbi') if wildcards.filtration == 'pre_filter' else multiext('{run}/{region}.beagle4.vcf.gz','','.tbi') 
+    output:
+        vcf = multiext('{run}/{region}.{filtration}.vcf.gz','','.tbi')
+    shell:
+        '''
+bcftools view -i 'QUAL>20' -o {output} {input}
+        '''    
 
 rule beagle4_imputation:
     input:
@@ -23,8 +34,8 @@ rule beagle4_imputation:
         multiext('{run}/{region}.beagle4.vcf.gz','','.tbi')
     threads: 6
     resources:
-        mem_mb = 4000,
-        walltime = lambda wildcards, input: '24h' if input.size_mb > 50 else '4h'
+        mem_mb_per_cpu = 4000,
+        runtime = lambda wildcards, input: '24h' if input.size_mb > 50 else '4h'
     shell:
         '''
         #add ne for popsize

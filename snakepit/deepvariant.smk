@@ -20,17 +20,14 @@ def get_checkpoint(model):
         case _:
             return config['model']
 
-def get_regions(region):
+def get_regions(wildcards):
     if region == 'all':
         return ''
     else:
-        return  '--regions "{' '.join(region_map[region])}"'
+        return '--regions "{' '.join(region_map[wildcards.region])}"'
 
-BAM_EXT = config.get('bam_index','.bai')
-
+## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
 def get_sample_bam_path(wildcards):
-    # query alignment_metadata for path?
-    # and index
     return alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
 
 #error can be caused by corrupted file, check gzip -t -v
@@ -46,7 +43,7 @@ rule deepvariant_make_examples:
         examples = lambda wildcards, output: PurePath(output['examples']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: PurePath(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         model_args = make_custom_example_arguments(config['model']),
-        regions = lambda wildcards: get_regions(wildcards.region) 
+        regions = get_regions
     threads: 1
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
@@ -117,17 +114,16 @@ rule deepvariant_postprocess:
 --cpus {threads}
         '''
 
-#TODO: can we scatter off of the region BED file? 
-#Scatter all regions if just FAI
 rule bcftools_scatter:
     input:
         gvcf = expand(rules.deepvariant_postprocess.output['gvcf'],region='all',allow_missing=True),
-        regions = '/cluster/work/pausch/vcf_UCD/2023_07/regions.bed' # fix to be general
+        regions = config.get('regions',f"{config['reference']}.fai")
     output:
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True),
-        expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.csi',region=regions,allow_missing=True)
+        expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True)
     params:
-        regions = regions,
+        regions = ' '.join(regions),
+        region_cols = lambda wildcards, input: f"<(cut -f {2 if 'regions' in config else 1} {input.regions})",
         _dir = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
     threads: 2
     resources:
@@ -135,11 +131,11 @@ rule bcftools_scatter:
         runtime = '1h'
     shell:
         '''
-bcftools +scatter {input.gvcf[0]} -o {params._dir} -Oz --threads {threads} --write-index -S {input.regions} -x unplaced --no-version
+bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} --write-index=tbi -S {params.region_cols} -x unplaced --no-version
 for R in {params.regions}
 do 
-    mv {params._dir}/$R.vcf.gz {params._dir}.$R.g.vcf.gz
-    mv {params._dir}/$R.vcf.gz.csi {params._dir}.$R.g.vcf.gz.csi
+    mv $TMPDIR/$R.vcf.gz {params._dir}.$R.g.vcf.gz
+    mv $TMPDIR/$R.vcf.gz.csi {params._dir}.$R.g.vcf.gz.csi
 done
         '''
 

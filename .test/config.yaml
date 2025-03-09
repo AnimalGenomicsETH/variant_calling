@@ -13,12 +13,13 @@ shards: 2
 run_name: 'test'
 
 ## Impute the variants.
-imputed: 'beagle4'
-
-
+variant_postprocess:
+  pre_filter: '-i "QUAL>=20"'
+  imputation: 'beagle4'
+  post_filter: '-i "D2>=0.8"'
 
 ## what regions do you want to run DeepVariant on. All is a catch-all for every contig.
-#regions: 'regions.bed'
+regions: 'regions.bed'
 
 ## DeepVariant model. Generally should use 'WGS'
 model: 'WGS'
@@ -29,10 +30,6 @@ checkpoint: '/cluster/work/pausch/alex/REF_DATA/RNA_DV_models/model.ckpt'
 GL_config:
   Unrevised: '/cluster/work/pausch/alex/BSW_analysis/config/GL_DV_raw.yml'
   DeepVariantWGS: ~
-
-# Filtering TODO: finish
-filtering:
-  basic: '-i ,,, ... '
 
 # DeepVariant and GLnexus containers.
 #TODO: update to v1.8

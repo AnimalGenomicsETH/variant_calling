@@ -1,11 +1,12 @@
 from pathlib import Path, PurePath
 import polars as pl
-from itertools import product
+#from itertools import product
 
 wildcard_constraints:
     region = r'[\w\.]+',
     sample = r'\w+',
     run = r'\w+',
+    filtration = r'Unrevised_filtered|beagle4',
     N = r'\d+',
 
 if 'binding_paths' in config:
@@ -26,21 +27,24 @@ def build_regions():
     return dict(region_map)
 
 regions = build_regions()
-
 alignment_metadata = pl.read_csv(config['alignment_metadata'])
-
-samples = pl.read_csv(config['alignment_metadata']).get_column('sample ID')
+samples = alignment_metadata.get_column('sample ID')
 
 include: 'snakepit/deepvariant.smk'
 ruleorder: deepvariant_postprocess > bcftools_scatter
 include: 'snakepit/imputation.smk'
-#include: 'snakepit/mendelian.smk'
-#ruleorder: remove_tigs > GLnexus_merge_families
+include: 'snakepit/mendelian.smk'
 #include: 'snakepit/merfin.smk'
 
-print(regions)
 def get_files():
     targets = []
+
+    postprocess_steps = {}
+    for i,step in enumerate(config['variant_postprocess']):
+        if i == 0:
+            postprocess_steps[step] = 'Unrevised'
+        else:
+            postprocess_steps[step] = list(postprocess_steps.keys())[-1]
 
     for region in regions:
         targets.append(f"{config.get('run_name','DeepVariant')}/{region}.{config.get('imputed','Unrevised')}.vcf.gz")
@@ -52,7 +56,6 @@ def get_files():
     # post-impute filter
     return targets
 
-print(get_files())
 rule all:
     input:
         get_files()
