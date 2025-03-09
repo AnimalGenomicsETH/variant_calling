@@ -23,21 +23,15 @@ def get_checkpoint(model):
 def get_regions(region):
     if region == 'all':
         return ''
-    if region not in config['regions']:
-        return ''
-    elif isinstance(config['regions'][region],str) and Path(config['regions'][region]).exists():
-        return f' --regions {config["regions"][region]}' #+ '"' + " ".join([l.strip() for l in open(config['regions'][region])]) + '"'
-    elif isinstance(config['regions'][region],str):
-        return f' --regions "{config["regions"][region]}"'
     else:
-        return ' --regions ' + '"' + f'{" ".join(map(str,config["regions"][region]))}' + '"'
+        return  '--regions "{' '.join(region_map[region])}"'
 
 BAM_EXT = config.get('bam_index','.bai')
 
 def get_sample_bam_path(wildcards):
     # query alignment_metadata for path?
     # and index
-    return ''
+    return alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
 
 #error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
@@ -123,7 +117,8 @@ rule deepvariant_postprocess:
 --cpus {threads}
         '''
 
-#can we scatter off of a better BED file?
+#TODO: can we scatter off of the region BED file? 
+#Scatter all regions if just FAI
 rule bcftools_scatter:
     input:
         gvcf = expand(rules.deepvariant_postprocess.output['gvcf'],region='all',allow_missing=True),
@@ -158,15 +153,13 @@ def get_GL_config(preset):
 
 rule GLnexus_merge:
     input:
-        #gvcfs = expand('{run}/deepvariant/{region}/{sample}.g.vcf.gz',sample=cohort_samples,allow_missing=True),
-        #tbi = expand('{run}/deepvariant/{region}/{sample}.g.vcf.gz.csi',sample=cohort_samples,allow_missing=True)
         gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=samples,allow_missing=True),
         tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=samples,allow_missing=True)
     output:
-        multiext('{run}/{region}.{preset}.vcf.gz','','.tbi')
+        multiext('{run}/{region}.Unrevised.vcf.gz','','.tbi')
     params:
-        preset = lambda wildcards: get_GL_config(wildcards.preset),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1024
+        preset = lambda wildcards: get_GL_config('Unrevised'),#wildcards.preset),
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb_per_cpu']/1024
     threads: config.get('resources',{}).get('merge',{}).get('threads',12),
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),

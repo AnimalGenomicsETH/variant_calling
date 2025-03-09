@@ -6,15 +6,19 @@ reference: 'ARS_UCD2.0.fasta'
 alignment_metadata: 'alignments.csv'
 
 
-## number of chunks to run make_examples on. More shards = more parallel.
-shards: 24
+## Number of chunks to run make_examples on. More shards = more parallel.
+shards: 2
 
-## whatever you want the output folder to be named
+## Name of the output folder
 run_name: 'test'
 
+## Impute the variants.
+imputed: 'beagle4'
+
+
+
 ## what regions do you want to run DeepVariant on. All is a catch-all for every contig.
-regions:
-  all: ~
+#regions: 'regions.bed'
 
 ## DeepVariant model. Generally should use 'WGS'
 model: 'WGS'

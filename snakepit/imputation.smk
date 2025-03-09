@@ -17,10 +17,10 @@ rule bcftools_scatter_X:
 
 rule beagle4_imputation:
     input:
-        vcf = 'variants/contigs/{region}.vcf.gz',
+        vcf = multiext('{run}/{region}.Unrevised.vcf.gz','','.tbi'),
         fai = f"{config['reference']}.fai"
     output:
-        multiext('variants/contigs/{region}.beagle4.vcf.gz','','.tbi')
+        multiext('{run}/{region}.beagle4.vcf.gz','','.tbi')
     threads: 6
     resources:
         mem_mb = 4000,
