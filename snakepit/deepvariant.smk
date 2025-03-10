@@ -1,22 +1,27 @@
-
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
-def make_custom_example_arguments(model):
+def make_custom_example_arguments(model,small=True): #TODO: allow switching on/off small model
+    common_long_read_options = '--alt_aligned_pileup "diff_channels" --parse_sam_aux_fields --partition_size "25000" --phase_reads --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" '
+    small_model = '--small_model_snp_gq_threshold 25 --small_model_indel_gq_threshold 30 --small_model_vaf_context_window_size 51 ' #TODO: this does not work for ONTr10
     match model:
-        case 'RNA' | 'WES':
-            return '--channels \'\' --split_skip_reads'
-        case 'PACBIO':
-            return '--add_hp_channel --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --vsc_min_fraction_indels "0.12"'
         case 'WGS':
-            return '--channels "insert_size"'
-        case _:
-            return '--channels \'\' --split_skip_reads'
+            return small_model + '--channel_list BASE_CHANNELS,insert_size'
+        case 'PACBIO':
+            return common_long_read_options + small_model '--max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
+        case 'MASSEQ':
+            return common_long_read_options + '--max_reads_per_partition 0 --min_mapping_quality 1 --pileup_image_width "199" --max_reads_for_dynamic_bases_per_region "1500"'
+        case 'ONT_R104':
+            return common_long_read_options + '--max_reads_per_partition "600" --min_mapping_quality "5" --pileup_image_width "99" --vsc_min_fraction_snps "0.08"'
+        case 'RNA' | 'WES' | _:
+            return '--channel_list BASE_CHANNELS --split_skip_reads'
 
-def get_checkpoint(model):
+#TODO: need to update models?
+def get_checkpoint(model,small=True):
+    path = f'/opt/{"small" if small else ""}models/'
     match model:
-        case 'PACBIO' | 'WGS':
-            return f'/opt/models/{model.lower()}'
+        case 'PACBIO' | 'MASSEQ' | 'WGS' | 'ONT_R104' :
+            return path + model.lower()
         case 'hybrid':
-            return '/opt/models/hybrid_pacbio_illumina'
+            return path + 'hybrid_pacbio_illumina'
         case _:
             return config['model']
 
@@ -30,7 +35,6 @@ def get_regions(wildcards):
 def get_sample_bam_path(wildcards):
     return alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
 
-#error can be caused by corrupted file, check gzip -t -v
 rule deepvariant_make_examples:
     input:
         reference = multiext(config['reference'],'','.fai'),
@@ -96,7 +100,8 @@ rule deepvariant_postprocess:
         gvcf = multiext('{run}/deepvariant/{sample}.{region}.g.vcf.gz','','.tbi')
     params:
         variants = lambda wildcards,input: PurePath(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
-        gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz')
+        gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
+        handle_sex_chromosomes = f'--haploid_contigs "X,Y" --par_regions_bed "{config["haploid_sex"]}"' if 'haploid_sex' in config else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),
@@ -111,16 +116,20 @@ rule deepvariant_postprocess:
 --gvcf_outfile {output.gvcf[0]} \
 --nonvariant_site_tfrecord_path {params.gvcf} \
 --novcf_stats_report \
+{params.handle_sex_chromosomes} \
 --cpus {threads}
         '''
 
 rule bcftools_scatter:
     input:
         gvcf = expand(rules.deepvariant_postprocess.output['gvcf'],region='all',allow_missing=True),
-        regions = config.get('regions',f"{config['reference']}.fai")
+        regions = config.get('regions',f"{config['reference']}.fai"),
+        fai = config['reference'] + ".fai"
     output:
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True),
         expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True)
+    wildcard_constraints:
+        region = "(?!all)"
     params:
         regions = ' '.join(regions),
         region_cols = lambda wildcards, input: f"<(cut -f {2 if 'regions' in config else 1} {input.regions})",
@@ -131,15 +140,15 @@ rule bcftools_scatter:
         runtime = '1h'
     shell:
         '''
-bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} --write-index=tbi -S {params.region_cols} -x unplaced --no-version
-for R in {params.regions}
-do 
-    mv $TMPDIR/$R.vcf.gz {params._dir}.$R.g.vcf.gz
-    mv $TMPDIR/$R.vcf.gz.csi {params._dir}.$R.g.vcf.gz.csi
-done
+        bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} -S {params.region_cols} -x unplaced --no-version
+        for R in {params.regions}
+        do 
+          bcftools reheader -f {input.fai} $TMPDIR/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
+          tabix -p vcf {params._dir}.$R.g.vcf.gz
+        done
         '''
 
-# add default to repo under config
+# see https://github.com/dnanexus-rnd/GLnexus/pull/310
 def get_GL_config(preset):
     match preset:
         case 'DeepVariantWGS' | 'DeepVariant_unfiltered' | 'DeepVariantWES_MED_DP':
@@ -159,18 +168,14 @@ rule GLnexus_merge:
     threads: config.get('resources',{}).get('merge',{}).get('threads',12),
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
-        runtime = config.get('resources',{}).get('merge',{}).get('runtime','4h'),
-    container: config.get('containers',{}).get('GLnexus','docker://ghcr.io/dnanexus-rnd/glnexus:v1.4.3')
+        runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h'),
     shell:
         '''
-/usr/local/bin/glnexus_cli \
---dir $TMPDIR/GLnexus.DB \
---config {params.preset} \
---threads {threads} \
---mem-gbytes {params.mem} \
-{input.gvcfs} |\
-bcftools view - |\
-bgzip -@ 8 -c > {output[0]} 
-
-tabix -p vcf {output[0]}
+        glnexus_cli \
+        --dir $TMPDIR/GLnexus.DB \
+        --config {params.preset} \
+        --threads {threads} \
+        --mem-gbytes {params.mem} \
+        {input.gvcfs} |\
+        bcftools view -@ {threads} -W=tbi {output[0]} 
         '''
