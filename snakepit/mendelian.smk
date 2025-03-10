@@ -5,39 +5,31 @@ def read_trios(ext='.{chr}.vcf.gz'):
     df = pd.read_csv(config['trios'])
     df.fillna('missing',inplace=True)
 
-    targets = []
-    for _, row in df.iterrows():
-        targets.append(get_dir('mendel',f'{"_".join(row)}{ext}'))
-    return targets
+def get_pedigree_samples(wildcards):
+    return ''
 
-ruleorder: remove_tigs > GLnexus_merge_families
-
-rule GLnexus_merge_families:
+#TODO: fix with new code
+rule GLnexus_merge_pedigree:
     input:
-        offspring = get_dir('output','{offspring}.bwa.{chr}.g.vcf.gz'),
-        sire  = lambda wildcards: get_dir('output','{sire}.bwa.{chr}.g.vcf.gz') if wildcards.sire != 'missing' else [],
-        dam = lambda wildcards: get_dir('output','{dam}.bwa.{chr}.g.vcf.gz') if wildcards.dam != 'missing' else []
+        expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=get_pedigree_samples)
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        vcf = '{run}/mendelian/{pedigree}.{region}.vcf.gz'
     params:
         gvcfs = lambda wildcards, input: list('/data/' / PurePath(fpath) for fpath in input),
         out = lambda wildcards, output: '/data' / PurePath(output[0]),
-        DB = lambda wildcards, output: f'/tmp/GLnexus.DB',
         singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data', input_bind=False, output_bind=False, work_bind=False),
-        mem = lambda wildcards,threads,resources: threads*resources['mem_mb']/1500
+        mem = lambda wildcards,threads,resources: threads*resources['mem_mb_per_cpu']/1500
     threads: 8
     resources:
-        mem_mb = 6000,
-        disk_scratch = 50,
-        walltime = '4:00',
-        use_singularity = True
+        mem_mb_per_cpu = 6000,
+        runtime = '4:00'
     shell:
         '''
         ulimit -Sn 4096
         {params.singularity_call} \
         {config[GL_container]} \
         /bin/bash -c " /usr/local/bin/glnexus_cli \
-        --dir {params.DB} \
+        --dir $TMPDIR \
         --config DeepVariantWGS \
         --threads {threads} \
         --mem-gbytes {params.mem} \
@@ -45,34 +37,10 @@ rule GLnexus_merge_families:
         | bcftools view - | bgzip -@ 2 -c > {params.out}"
         '''
 
-rule remove_tigs:
-    input:
-        multiext(get_dir('mendel','{offspring}_{sire}_{dam}.all.vcf.gz'),'','.tbi')
-    output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.autosomes.vcf.gz')
-    params:
-        regions = ','.join(map(str,range(1,30)))
-    threads: 2
-    resources:
-        mem_mb = 2000,
-        walltime = '20'
-    shell:
-        'bcftools view --threads {threads} -r {params.regions} -O z -o {output} {input[0]}'
-
-rule tabix:
-    input:
-        '{vcf}'
-    output:
-        '{vcf}.tbi'
-    resources:
-        mem_mb = 2000,
-        walltime = '20'
-    shell:
-        'tabix -p vcf {input}'
-
+#TODO: build better pedigrees if needed
 rule rtg_pedigree:
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.ped')
+        'mendelian/{offspring}_{sire}_{dam}.ped'
     shell:
         '''
         FILE={output}
@@ -90,88 +58,85 @@ cat <<EOM >$FILE
 EOM
         '''
 
+#TODO: fix singularity if needed
 rule rtg_format:
     input:
-        ref = lambda wildcards: multiext(config['reference'],'','.fai')
+        reference = lambda wildcards: multiext(config['reference'],'','.fai')
     output:
-        sdf = get_dir('main','ARS.sdf')
-    params:
-        singularity_call = lambda wildcards,input: make_singularity_call(wildcards,extra_args=f'-B {PurePath(input.ref[0]).parent}:/reference/,.:/data',tmp_bind=False,output_bind=False,work_bind=False),
-        ref = lambda wildcards,input: f'/reference/{PurePath(input.ref[0]).name}',
+        sdf = 'mendelian/reference.sdf'
+    container: ''
     shell:
         '''
-        {params.singularity_call} \
-        {config[RTG_container]} \
-        rtg format -o /data/{output.sdf} {params.ref}
+        rtg format -o {output.sdf} {input.reference[0]}
         '''
 
 rule rtg_mendelian_concordance:
     input:
-        sdf = get_dir('main','ARS.sdf'),
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz'),
-        pedigree = get_dir('mendel','{offspring}_{sire}_{dam}.ped')
+        sdf = rules.rtg_format.output['sdf'],
+        vcf = rules.GLnexus_merge_pedigree.output['vcf'],
+        pedigree = 'mendelian/{offspring}_{sire}_{dam}.ped'
     output:
-        temp = temp(get_dir('mendel','filled_{offspring}_{sire}_{dam}.{chr}.vcf.gz')),
-        results = multiext(get_dir('mendel','{offspring}_{sire}_{dam}.{chr}'),'.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
+        temp = temp('mendelian/filled_{offspring}_{sire}_{dam}.{chr}.vcf.gz'),
+        results = multiext('mendelian/{offspring}_{sire}_{dam}.{chr}','.inconsistent.vcf.gz','.inconsistent.stats','.mendel.log')
     params:
         vcf_in = lambda wildcards, input, output: '/data' / PurePath(input.vcf) if (wildcards.dam != 'missing' and wildcards.sire != 'missing') else '/data' / PurePath(output.temp),
         vcf_annotated = lambda wildcards, output: '/data' / PurePath(output.results[0]),
-        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
     threads: 1
     resources:
-        mem_mb = 10000,
-        walltime = '30'
+        mem_mb_per_cpu = 10000,
+        runtime = '30'
+    container: ''
     shell:
         '''
-        #bcftools view -s BSWCHEM120096296001 -Ou RM808_BSWCHEM120096296001_missing.vcf.gz | bcftools reheader --samples <(echo missing) | bcftools merge --no-index -o filled_RM808_BSWCHEM120096296001_missing.vcf.gz -Oz RM808_BSWCHEM120096296001_missing.vcf.gz -
         bcftools merge --no-index -o {output.temp} -Oz {input.vcf} {config[missing_template]}
-        {params.singularity_call} \
-        {config[RTG_container]} \
-        /bin/bash -c "rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.results[2]}"
+        
+        rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.results[2]}
+        
         bcftools stats {output.results[0]} | grep "^SN" > {output.results[1]}
         '''
 
 rule rtg_vcfeval:
     input:
-        sdf = get_dir('main','ARS.sdf'),
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        sdf = rules.rtg_format.output['sdf'],
+        vcf = 'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        logs = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcfeval.log')
+        logs = 'mendelian/{offspring}_{sire}_{dam}.{chr}.vcfeval.log'
     params:
         samples = lambda wildcards: f'{wildcards.sire if wildcards.sire != "missing" else wildcards.dam},{wildcards.offspring}',
-        singularity_call = lambda wildcards: make_singularity_call(wildcards,'-B .:/data',input_bind=False,output_bind=False,work_bind=False)
     threads: 4
     resources:
-        mem_mb = 5000,
-        disk_scratch = 20
+        mem_mb_per_cpu = 5000,
+    container: ''
     shell:
         '''
-        {params.singularity_call} \
-        {config[RTG_container]} \
-        /bin/bash -c "cd $TMPDIR; rtg vcfeval -t /data/{input.sdf} -b /data/{input.vcf} -c /data/{input.vcf} --sample {params.samples} -o null_output -T {threads} --no-roc --squash-ploidy --output-mode=roc-only > /data/{output}"
+cd $TMPDIR
+
+rtg vcfeval -t /data/{input.sdf} -b /data/{input.vcf} -c /data/{input.vcf} \
+--sample {params.samples} -o null_output -T {threads} --no-roc \
+--squash-ploidy --output-mode=roc-only > /data/{output}
         '''
 
 rule bcftools_mendelian:
     input:
-        vcf = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        vcf = 'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        logs = get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.mendelian.log')
+        logs = 'mendelian/{offspring}_{sire}_{dam}.{chr}.mendelian.log'
     params:
         sample = '{dam},{sire},{offspring}'
     threads: 1
     resources:
-        mem_mb = 3000,
-        walltime = '30'
+        mem_mb_per_cpu = 3000,
+        runtime = '30'
     shell:
         '''
-        bcftools +mendelian {input.vcf} -t {params.sample} -m c -m x > >(bcftools stats - | grep "SN" >> {output}) 2> >(grep -v "#" >> {output})
+bcftools +mendelian {input.vcf} -t {params.sample} -m c -m x > >(bcftools stats - | grep "SN" >> {output}) 2> >(grep -v "#" >> {output})
         '''
 
 rule bcftools_count:
     input:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.count')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.count'
     shell:
         '''
         tabix -fp vcf {input}
@@ -180,12 +145,12 @@ rule bcftools_count:
 
 rule genotype_count:
     input:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.vcf.gz')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.vcf.gz'
     output:
-        get_dir('mendel','{offspring}_{sire}_{dam}.{chr}.genotypes')
+        'mendelian/{offspring}_{sire}_{dam}.{chr}.genotypes'
     shell:
         '''
-        bcftools annotate -x INFO,^FORMAT/GT {input} | grep -oP "([\.|\d]/[/.|\d])" | sort | uniq -c > {output}
+bcftools annotate -x INFO,^FORMAT/GT {input} | grep -oP "([\\.|\\d]/[/.|\\d])" | sort | uniq -c > {output}
         '''
 
 rule mendel_summary:
@@ -193,7 +158,7 @@ rule mendel_summary:
         logs = read_trios('.{chr}.mendelian.log'),
         stats = read_trios('.{chr}.count')
     output:
-        get_dir('main','mendel.{caller}.{chr}.summary.df')
+        'mendelian/{caller}.{chr}.summary.df'
     run:
         import pandas as pd
 
@@ -219,4 +184,3 @@ rule mendel_summary:
         df['duo'] = (df == 'missing').any(axis=1)
         df['caller'] = wildcards.caller
         df.to_csv(output[0],index=False)
-
