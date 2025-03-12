@@ -6,7 +6,7 @@ def make_custom_example_arguments(model,small=True): #TODO: allow switching on/o
         case 'WGS':
             return small_model + '--channel_list BASE_CHANNELS,insert_size'
         case 'PACBIO':
-            return common_long_read_options + small_model '--max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
+            return common_long_read_options + small_model + '--max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
         case 'MASSEQ':
             return common_long_read_options + '--max_reads_per_partition 0 --min_mapping_quality 1 --pileup_image_width "199" --max_reads_for_dynamic_bases_per_region "1500"'
         case 'ONT_R104':
@@ -26,7 +26,7 @@ def get_checkpoint(model,small=True):
             return config['model']
 
 def get_regions(wildcards):
-    if region == 'all':
+    if wildcards.region == 'all':
         return ''
     else:
         return '--regions "{' '.join(region_map[wildcards.region])}"'
@@ -101,7 +101,7 @@ rule deepvariant_postprocess:
     params:
         variants = lambda wildcards,input: PurePath(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        handle_sex_chromosomes = f'--haploid_contigs "X,Y" --par_regions_bed "{config["haploid_sex"]}"' if 'haploid_sex' in config else ''
+        handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"'
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),

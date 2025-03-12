@@ -58,7 +58,6 @@ cat <<EOM >$FILE
 EOM
         '''
 
-#TODO: fix singularity if needed
 rule rtg_format:
     input:
         reference = lambda wildcards: multiext(config['reference'],'','.fai')
@@ -67,7 +66,7 @@ rule rtg_format:
     container: ''
     shell:
         '''
-        rtg format -o {output.sdf} {input.reference[0]}
+rtg format -o {output.sdf} {input.reference[0]}
         '''
 
 rule rtg_mendelian_concordance:
@@ -88,11 +87,11 @@ rule rtg_mendelian_concordance:
     container: ''
     shell:
         '''
-        bcftools merge --no-index -o {output.temp} -Oz {input.vcf} {config[missing_template]}
+bcftools merge --no-index -o {output.temp} -Oz {input.vcf} {config[missing_template]}
         
-        rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.results[2]}
+rtg mendelian -i {params.vcf_in} --output-inconsistent {params.vcf_annotated} --pedigree=/data/{input.pedigree} -t /data/{input.sdf} > /data/{output.results[2]}
         
-        bcftools stats {output.results[0]} | grep "^SN" > {output.results[1]}
+bcftools stats {output.results[0]} | grep "^SN" > {output.results[1]}
         '''
 
 rule rtg_vcfeval:

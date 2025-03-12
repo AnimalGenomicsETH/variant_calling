@@ -20,6 +20,7 @@ variant_postprocess:
 
 ## what regions do you want to run DeepVariant on. All is a catch-all for every contig.
 regions: 'regions.bed'
+PAR_regions: 'PAR.bed'
 
 ## DeepVariant model. Generally should use 'WGS'
 model: 'WGS'
@@ -32,7 +33,3 @@ GL_config:
   DeepVariantWGS: ~
 
 # DeepVariant and GLnexus containers.
-#TODO: update to v1.8
-containers:
-  DV: '/cluster/work/pausch/alex/software/images/deepvariant_1.4.0.sif'
-  GLnexus: '/cluster/work/pausch/alex/software/images/glnexus_v1.4.1.sif'
