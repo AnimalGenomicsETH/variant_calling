@@ -1,6 +1,5 @@
 from pathlib import Path, PurePath
 import polars as pl
-#from itertools import product
 
 wildcard_constraints:
     region = r'[\w\.]+',
@@ -34,35 +33,27 @@ include: 'snakepit/deepvariant.smk'
 ruleorder: deepvariant_postprocess > bcftools_scatter
 include: 'snakepit/imputation.smk'
 include: 'snakepit/mendelian.smk'
+include: 'snakepit/SV_calling.smk'
 #include: 'snakepit/merfin.smk'
 
 def get_files():
     targets = []
 
-    postprocess_steps = {}
-    for i,step in enumerate(config['variant_postprocess']):
-        if i == 0:
-            postprocess_steps[step] = 'Unrevised'
-        else:
-            postprocess_steps[step] = list(postprocess_steps.keys())[-1]
+    if 'SV' in config.get('targets',[]):
+        print('handle SVs')
+    if 'SV' in config.get('targets',[]):
+        postprocess_steps = {} #TODO: this is not good
+        for i,step in enumerate(config['variant_postprocess']):
+            if i == 0:
+                postprocess_steps[step] = 'Unrevised'
+            else:
+                postprocess_steps[step] = list(postprocess_steps.keys())[-1]
 
-    for region in regions:
-        targets.append(f"{config.get('run_name','DeepVariant')}/{region}.{config.get('imputed','Unrevised')}.vcf.gz")
-    
-    # handle per chromosome, imputed/unfiltered/etc
-    # raw DV call
-    # post-DV filter
-    # raw impute
-    # post-impute filter
+        for region in regions:
+            targets.append(f"{config.get('run_name','DeepVariant')}/{region}.{config.get('imputed','Unrevised')}.vcf.gz")
+
     return targets
 
 rule all:
     input:
         get_files()
-        #expand('{name}/{region}.{preset}.vcf.gz',name=config.get('run_name','DeepVariant'),region=regions,preset=config['GL_config']),
-        #expand('{name}/{region}.{preset}.vcf.gz.tbi',name=config.get('run_name','DeepVariant'),region=regions,preset=config['GL_config']),
-        #expand('variants/contigs/{region}.beagle4.vcf.gz',region=regions),
-        #'merfin_isec.upset',
-        #'merfin_filtering.csv',
-        #expand('merfin/{sample}_merfin.intersections',sample=config['samples']),
-        #expand('merfin/{sample}.{vcf}.merfin.{fitted}.filter.vcf',sample=config['samples'],vcf=config['vcfs'],fitted=config['modes'])

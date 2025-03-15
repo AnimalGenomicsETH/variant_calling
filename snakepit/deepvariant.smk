@@ -140,12 +140,12 @@ rule bcftools_scatter:
         runtime = '1h'
     shell:
         '''
-        bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} -S {params.region_cols} -x unplaced --no-version
-        for R in {params.regions}
-        do 
-          bcftools reheader -f {input.fai} $TMPDIR/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
-          tabix -p vcf {params._dir}.$R.g.vcf.gz
-        done
+bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} -S {params.region_cols} -x unplaced --no-version
+for R in {params.regions}
+do 
+    bcftools reheader -f {input.fai} $TMPDIR/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
+    tabix -p vcf {params._dir}.$R.g.vcf.gz
+done
         '''
 
 # see https://github.com/dnanexus-rnd/GLnexus/pull/310
@@ -171,11 +171,11 @@ rule GLnexus_merge:
         runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h'),
     shell:
         '''
-        glnexus_cli \
-        --dir $TMPDIR/GLnexus.DB \
-        --config {params.preset} \
-        --threads {threads} \
-        --mem-gbytes {params.mem} \
-        {input.gvcfs} |\
-        bcftools view -@ {threads} -W=tbi {output[0]} 
+glnexus_cli \
+--dir $TMPDIR/GLnexus.DB \
+--config {params.preset} \
+--threads {threads} \
+--mem-gbytes {params.mem} \
+{input.gvcfs} | \
+bcftools view -@ {threads} -W=tbi {output[0]} 
         '''

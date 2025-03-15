@@ -1,10 +1,9 @@
-
-
-
 reference: 'ARS_UCD2.0.fasta'
 
 alignment_metadata: 'alignments.csv'
 
+targets:
+  - SV
 
 ## Number of chunks to run make_examples on. More shards = more parallel.
 shards: 2

@@ -1,7 +1,6 @@
-
 rule pbsv_discover:
     input:
-        expand(rules.samtools_merge.output,mapper='mm2',allow_missing=True)
+        bam = multiext('alignments/{sample}.pbmm2.bam','','.csi'),
     output:
         'variants/SVs/{sample}.svsig.gz'
     conda:
@@ -25,15 +24,14 @@ rule pbsv_call:
     shell:
         'pbsv call --hifi -j {threads} {config[reference]} {input.signatures} {output}'
 
-
-CHROMOSOMES = list(map(str,range(1,30)))+['X','Y','MT']
+CHROMOSOMES = list(map(str,range(1,30))) + ['X','Y','MT']
 
 rule sawfish_discover:
     input:
         bam = multiext('alignments/{sample}.pbmm2.bam','','.csi'),
         reference = config['reference']
     output:
-        directory('SVs/sawfish/{sample}')
+        candidates = directory('SVs/sawfish/{sample}')
     params:
         regions = ','.join(CHROMOSOMES)
     threads: 12
@@ -55,11 +53,11 @@ sawfish discover \
 #TODO: Push samples to main
 rule sawfish_joint_call:
     input:
-        bam = expand(rules.sawfish_discover.output,sample=metadata.get_column('Interbull ID').unique().to_list())
+        candidates = expand(rules.sawfish_discover.output['candidates'],sample=samples)
     output:
         directory('sawfish/SVs')
     params:
-        files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.bam),
+        files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
         regions = ','.join(CHROMOSOMES)
     threads: 8
     resources:
@@ -69,7 +67,7 @@ rule sawfish_joint_call:
         '''
 sawfish joint-call \
 --threads {threads} \
---output-dir {output} \
-{params.files} \
---target-region {params.regions}
+--output-dir {output.vcf} \
+--target-region {params.regions} \
+{params.files}
         '''
