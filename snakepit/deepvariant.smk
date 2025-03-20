@@ -6,7 +6,7 @@ def make_custom_example_arguments(model,small=True): #TODO: allow switching on/o
         case 'WGS':
             return small_model + '--channel_list BASE_CHANNELS,insert_size'
         case 'PACBIO':
-            return common_long_read_options + small_model + '--max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
+            return common_long_read_options + small_model + '--channel_list BASE_CHANNELS --max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
         case 'MASSEQ':
             return common_long_read_options + '--max_reads_per_partition 0 --min_mapping_quality 1 --pileup_image_width "199" --max_reads_for_dynamic_bases_per_region "1500"'
         case 'ONT_R104':
@@ -29,11 +29,23 @@ def get_regions(wildcards):
     if wildcards.region == 'all':
         return ''
     else:
-        return '--regions "{' '.join(region_map[wildcards.region])}"'
+        return f'--regions "{' '.join(regions[wildcards.region])}"'
 
+from pathlib import Path
 ## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
 def get_sample_bam_path(wildcards):
-    return alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
+    bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
+    print(Path(bam).suffix)
+    match Path(bam).suffix:
+        case '.bam':
+            if Path(f"{bam}.bai").exists():
+                return bam, f"{bam}.bai"
+            elif Path(f"{bam}.csi").exists():
+                return bam, f"{bam}.csi"
+        case '.cram':
+            if Path(f"{bam}.crai").exists():
+                return bam, f"{bam}.crai"
+    raise Exception(f"BAM file ({bam}) is not indexed.")
 
 rule deepvariant_make_examples:
     input:
@@ -52,7 +64,7 @@ rule deepvariant_make_examples:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
         runtime = config.get('resources',{}).get('make_examples',{}).get('runtime','4h'),
-    container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
+    container: '/cluster/work/pausch/alex/software/images/deepvariant_1.8.0.sif'
     shell:
         '''
 /opt/deepvariant/bin/make_examples \
@@ -81,7 +93,7 @@ rule deepvariant_call_variants:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
         runtime = config.get('resources',{}).get('call_variants',{}).get('runtime','24h'),
-    container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
+    container: '/cluster/work/pausch/alex/software/images/deepvariant_1.8.0.sif'
     shell:
         '''
 /opt/deepvariant/bin/call_variants \
@@ -106,7 +118,7 @@ rule deepvariant_postprocess:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),
         runtime = config.get('resources',{}).get('postprocess',{}).get('runtime','4h'),
-    container: config.get('containers',{}).get('DV','docker://google/deepvariant:latest')
+    container: '/cluster/work/pausch/alex/software/images/deepvariant_1.8.0.sif'
     shell:
         '''
 /opt/deepvariant/bin/postprocess_variants \

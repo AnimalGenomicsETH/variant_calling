@@ -26,15 +26,32 @@ rule pbsv_call:
 
 CHROMOSOMES = list(map(str,range(1,30))) + ['X','Y','MT']
 
+from pathlib import Path
+## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
+def get_sample_bam_path(wildcards):
+    bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
+    match Path(bam).suffix:
+        case '.bam':
+            if Path(f"{bam}.bai").exists():
+                return bam, f"{bam}.bai"
+            elif Path(f"{bam}.csi").exists():
+                return bam, f"{bam}.csi"
+        case '.cram':
+            if Path(f"{bam}.crai").exists():
+                return bam, f"{bam}.crai"
+    raise Exception(f"BAM file ({bam}) is not indexed.")
+
 rule sawfish_discover:
     input:
-        bam = multiext('alignments/{sample}.pbmm2.bam','','.csi'),
-        reference = config['reference']
+        bam = get_sample_bam_path,
+        reference = config['reference'],
+        PAR = config['PAR'] if 'PAR' in config else []
     output:
         candidates = directory('SVs/sawfish/{sample}')
     params:
-        regions = ','.join(CHROMOSOMES)
-    threads: 12
+        regions = ','.join(CHROMOSOMES),
+        PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else ''
+    threads: 8
     resources:
         mem_mb_per_cpu = 7000,
         runtime = '4h'
@@ -47,7 +64,7 @@ sawfish discover \
 --bam {input.bam[0]} \
 --target-region {params.regions} \
 --cov-regex "^\d+" \
---expected-cn {input.PAR}
+{params.PAR}
         '''
 
 #TODO: Push samples to main
@@ -55,7 +72,7 @@ rule sawfish_joint_call:
     input:
         candidates = expand(rules.sawfish_discover.output['candidates'],sample=samples)
     output:
-        directory('sawfish/SVs')
+        vcf = directory('sawfish/SVs')
     params:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
         regions = ','.join(CHROMOSOMES)
