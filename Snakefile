@@ -40,8 +40,8 @@ def get_files():
     targets = []
 
     if 'SV' in config.get('targets',[]):
-        print('handle SVs')
-    if 'SV' in config.get('targets',[]):
+        targets.append('sawfish/SVs')
+    if 'small' in config.get('targets',[]):
         postprocess_steps = {} #TODO: this is not good
         for i,step in enumerate(config['variant_postprocess']):
             if i == 0:

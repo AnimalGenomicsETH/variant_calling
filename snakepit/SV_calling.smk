@@ -90,20 +90,20 @@ sawfish joint-call \
 
 rule pbsv_predict_tandem_repeats:
     input:
-        ''
+        reference = config['reference']
     output:
         bed = 'GCA_002263795.4_ARS-UCD2.0_genomic.trf.bed'
     shell:
-    '''
-#TODO: add pbsv script
-    '''
+        '''
+TODO: add pbsv script
+        '''
 
 rule sniffles2_call:
     input:
-        bam = expand(rules.samtools_merge.output,allow_missing=True),
+        bam = get_sample_bam_path,
         reference = config['reference'],
         TR = rules.pbsv_predict_tandem_repeats.output['bed'],
-        SV_panel = rules.sniffles_filter.output if wildcards.mode == 'forced' else []
+        SV_panel = lambda wildcards: rules.sniffles_filter.output if wildcards.mode == 'forced' else []
     output:
         vcf = 'SVs/sniffles2/{sample}.{mode}.vcf.gz',
         snf = 'SVs/sniffles2/{sample}.{mode}.snf'
@@ -130,7 +130,7 @@ sniffles \
 
 rule sniffles_merge:
     input:
-        snfs = expand(rules.sniffles2_denovo_call.output['snf'],sample=samples,allow_missing=True),
+        snfs = expand(rules.sniffles2_call.output['snf'],sample=samples,allow_missing=True),
         reference = config['reference'],
         TR = rules.pbsv_predict_tandem_repeats.output['bed'],
     output:

@@ -4,6 +4,7 @@ alignment_metadata: 'alignments.csv'
 
 targets:
   - SV
+  - small
 
 ## Number of chunks to run make_examples on. More shards = more parallel.
 shards: 2

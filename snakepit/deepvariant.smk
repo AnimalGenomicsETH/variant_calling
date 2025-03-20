@@ -1,22 +1,38 @@
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
-def make_custom_example_arguments(model,small=True): #TODO: allow switching on/off small model
+#e.g., running Apptainer> run_deepvariant  --model_type ONT_R104 --ref GL_DV_raw.yml --reads README.md --output_vcf test --num_shards 10 --intermediate_results_dir inter --dry_run --disable_small_model=true
+
+#use_multiallelic_model?
+def make_custom_example_arguments(model):
     common_long_read_options = '--alt_aligned_pileup "diff_channels" --parse_sam_aux_fields --partition_size "25000" --phase_reads --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" '
     small_model = '--small_model_snp_gq_threshold 25 --small_model_indel_gq_threshold 30 --small_model_vaf_context_window_size 51 ' #TODO: this does not work for ONTr10
     match model:
         case 'WGS':
-            return small_model + '--channel_list BASE_CHANNELS,insert_size'
+            if config.get('small_model',False):
+                return '--checkpoint "/opt/models/wgs"'
+            else:
+                return '--checkpoint "/opt/models/wgs" --call_small_model_examples --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --trained_small_model_path "/opt/smallmodels/wgs"'
+           #return small_model + '--channel_list BASE_CHANNELS,insert_size'
         case 'PACBIO':
-            return common_long_read_options + small_model + '--channel_list BASE_CHANNELS --max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
+            if config.get('small_model',False):
+                return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"' 
+            else:
+                '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'    
+            #return common_long_read_options + small_model + '--channel_list BASE_CHANNELS --max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
         case 'MASSEQ':
             return common_long_read_options + '--max_reads_per_partition 0 --min_mapping_quality 1 --pileup_image_width "199" --max_reads_for_dynamic_bases_per_region "1500"'
         case 'ONT_R104':
-            return common_long_read_options + '--max_reads_per_partition "600" --min_mapping_quality "5" --pileup_image_width "99" --vsc_min_fraction_snps "0.08"'
+            if config.get('small_model',False):
+                return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" --vsc_min_fraction_snps "0.08"'
+            else:
+                return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --small_model_indel_gq_threshold "25" --small_model_snp_gq_threshold "20" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/ont_r104" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" --vsc_min_fraction_snps "0.08"'
+            #base = '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" --vsc_min_fraction_snps "0.08"'
+            #return common_long_read_options + '--max_reads_per_partition "600" --min_mapping_quality "5" --pileup_image_width "99" --vsc_min_fraction_snps "0.08"'
         case 'RNA' | 'WES' | _:
             return '--channel_list BASE_CHANNELS --split_skip_reads'
 
 #TODO: need to update models?
-def get_checkpoint(model,small=True):
-    path = f'/opt/{"small" if small else ""}models/'
+def get_checkpoint(model):
+    path = f'/opt/models/'
     match model:
         case 'PACBIO' | 'MASSEQ' | 'WGS' | 'ONT_R104' :
             return path + model.lower()
@@ -35,7 +51,6 @@ from pathlib import Path
 ## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
 def get_sample_bam_path(wildcards):
     bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
-    print(Path(bam).suffix)
     match Path(bam).suffix:
         case '.bam':
             if Path(f"{bam}.bai").exists():
@@ -113,7 +128,8 @@ rule deepvariant_postprocess:
     params:
         variants = lambda wildcards,input: PurePath(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
         gvcf = lambda wildcards,input: PurePath(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"'
+        handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"',
+        small_model = '--small_model_cvo_records "inter/make_examples_call_variant_outputs.tfrecord@10.gz"'
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',20000),
