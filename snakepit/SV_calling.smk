@@ -2,7 +2,7 @@ rule pbsv_discover:
     input:
         bam = multiext('alignments/{sample}.pbmm2.bam','','.csi'),
     output:
-        'variants/SVs/{sample}.svsig.gz'
+        'SVs/pbsv/{sample}.svsig.gz'
     conda:
         'pbccs'
     threads: 1
@@ -15,7 +15,7 @@ rule pbsv_call:
     input:
         signatures = expand(rules.pbsv_discover.output,sample=('BSWCHEF120141990854',))#config['samples'])
     output:
-        'variants/SVs/cohort.SV.vcf'
+        'SVs/pbsv/cohort.SV.vcf'
     conda:
         'pbccs'
     threads: 8
@@ -67,7 +67,6 @@ sawfish discover \
 {params.PAR}
         '''
 
-#TODO: Push samples to main
 rule sawfish_joint_call:
     input:
         candidates = expand(rules.sawfish_discover.output['candidates'],sample=samples)
@@ -87,4 +86,71 @@ sawfish joint-call \
 --output-dir {output.vcf} \
 --target-region {params.regions} \
 {params.files}
+        '''
+
+rule pbsv_predict_tandem_repeats:
+    input:
+        ''
+    output:
+        bed = 'GCA_002263795.4_ARS-UCD2.0_genomic.trf.bed'
+    shell:
+    '''
+#TODO: add pbsv script
+    '''
+
+rule sniffles2_call:
+    input:
+        bam = expand(rules.samtools_merge.output,allow_missing=True),
+        reference = config['reference'],
+        TR = rules.pbsv_predict_tandem_repeats.output['bed'],
+        SV_panel = rules.sniffles_filter.output if wildcards.mode == 'forced' else []
+    output:
+        vcf = 'SVs/sniffles2/{sample}.{mode}.vcf.gz',
+        snf = 'SVs/sniffles2/{sample}.{mode}.snf'
+    params:
+        panel = lambda wildcards, input: '--genotype-vcf {input.SV_panel}' if wildcards.mode == 'forced'  else ''
+    threads: 4
+    resources:
+        mem_mb_per_cpu = 2000
+    conda:
+        'sniffles'
+    shell:
+        '''
+sniffles \
+--input {input.bam[0]} \
+--reference {input.reference} \
+--tandem-repeats {input.TR} \
+--sample-id {wildcards.sample} \
+--threads {threads} \
+--max-del-seq-len 100000 \
+{params.panel} \
+--vcf {output.vcf} \
+--snf {output.snf}
+        '''
+
+rule sniffles_merge:
+    input:
+        snfs = expand(rules.sniffles2_denovo_call.output['snf'],sample=samples,allow_missing=True),
+        reference = config['reference'],
+        TR = rules.pbsv_predict_tandem_repeats.output['bed'],
+    output:
+        vcf = 'SVs/sniffles2/cohort.denovo.vcf.gz',
+        filtered = 'SVs/sniffles2/cohort.denovo.filtered.vcf.gz'
+    threads: 12
+    resources:
+        mem_mb_per_cpu = 3000
+    conda:
+        'sniffles'
+    shell:
+        '''
+sniffles \
+--input {input.snfs} \
+--reference {input.reference} \
+--tandem-repeats {input.TR} \
+--threads {threads} \
+--max-del-seq-len 100000 \
+--vcf {output.vcf}
+
+bcftools +fill-from-fasta {output.vcf} -- -c REF -f {input.reference} |\
+bcftools view --threads {threads} -i 'abs(INFO/SVLEN)<=1000000&&INFO/SVTYPE!="BND"' -o {output.filtered} --write-index
         '''
