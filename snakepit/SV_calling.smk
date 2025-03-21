@@ -53,8 +53,8 @@ rule sawfish_discover:
         PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else ''
     threads: 8
     resources:
-        mem_mb_per_cpu = 7000,
-        runtime = '4h'
+        mem_mb_per_cpu = 9000,
+        runtime = '24h'
     shell:
         '''
 sawfish discover \
@@ -63,7 +63,7 @@ sawfish discover \
 --ref {input.reference} \
 --bam {input.bam[0]} \
 --target-region {params.regions} \
---cov-regex "^\d+" \
+--cov-regex "^\\d+" \
 {params.PAR}
         '''
 
@@ -71,7 +71,7 @@ rule sawfish_joint_call:
     input:
         candidates = expand(rules.sawfish_discover.output['candidates'],sample=samples)
     output:
-        vcf = directory('sawfish/SVs')
+        vcf = directory('SVs/sawfish/cohort')
     params:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
         regions = ','.join(CHROMOSOMES)

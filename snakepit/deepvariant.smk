@@ -16,7 +16,7 @@ def make_custom_example_arguments(model):
             if config.get('small_model',False):
                 return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"' 
             else:
-                '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'    
+                return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
             #return common_long_read_options + small_model + '--channel_list BASE_CHANNELS --max_reads_per_partition "600" --min_mapping_quality "1" --pileup_image_width "147"'
         case 'MASSEQ':
             return common_long_read_options + '--max_reads_per_partition 0 --min_mapping_quality 1 --pileup_image_width "199" --max_reads_for_dynamic_bases_per_region "1500"'
@@ -60,6 +60,7 @@ def get_sample_bam_path(wildcards):
         case '.cram':
             if Path(f"{bam}.crai").exists():
                 return bam, f"{bam}.crai"
+    return bam
     raise Exception(f"BAM file ({bam}) is not indexed.")
 
 rule deepvariant_make_examples:
@@ -179,6 +180,8 @@ done
 # see https://github.com/dnanexus-rnd/GLnexus/pull/310
 def get_GL_config(preset):
     match preset:
+        case 'Unrevised':
+            return f"{workflow.basedir}/GLnexus_Unrevised.yml"
         case 'DeepVariantWGS' | 'DeepVariant_unfiltered' | 'DeepVariantWES_MED_DP':
             return preset
         case _:
@@ -205,5 +208,5 @@ glnexus_cli \
 --threads {threads} \
 --mem-gbytes {params.mem} \
 {input.gvcfs} | \
-bcftools view -@ {threads} -W=tbi {output[0]} 
+bcftools view --threads {threads} -W=tbi -o {output[0]}
         '''

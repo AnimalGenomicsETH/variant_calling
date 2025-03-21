@@ -40,7 +40,8 @@ def get_files():
     targets = []
 
     if 'SV' in config.get('targets',[]):
-        targets.append('sawfish/SVs')
+        targets.append('SVs/sawfish/cohort')
+
     if 'small' in config.get('targets',[]):
         postprocess_steps = {} #TODO: this is not good
         for i,step in enumerate(config['variant_postprocess']):
@@ -49,8 +50,11 @@ def get_files():
             else:
                 postprocess_steps[step] = list(postprocess_steps.keys())[-1]
 
-        for region in regions:
-            targets.append(f"{config.get('run_name','DeepVariant')}/{region}.{config.get('imputed','Unrevised')}.vcf.gz")
+        if 'regions' in config:
+            for region in regions:
+                targets.append(f"{config.get('run_name','DeepVariant')}/{region}.{config.get('imputed','Unrevised')}.vcf.gz")
+        else:
+            targets.append(f"{config.get('run_name','DeepVariant')}/all.{config.get('imputed','Unrevised')}.vcf.gz")
 
     return targets
 
