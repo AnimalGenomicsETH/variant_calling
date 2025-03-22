@@ -192,21 +192,37 @@ rule GLnexus_merge:
         gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=samples,allow_missing=True),
         tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=samples,allow_missing=True)
     output:
-        multiext('{run}/{region}.Unrevised.vcf.gz','','.tbi')
+        '{run}/{region}.Unrevised.bcf'
     params:
         preset = lambda wildcards: get_GL_config('Unrevised'),#wildcards.preset),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb_per_cpu']/1024
     threads: config.get('resources',{}).get('merge',{}).get('threads',12),
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
-        runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h'),
+        runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h')
+    container: '/cluster/work/pausch/alex/software/images/glnexus_v1.4.1.sif'
     shell:
         '''
-glnexus_cli \
+/usr/local/bin/glnexus_cli \
 --dir $TMPDIR/GLnexus.DB \
 --config {params.preset} \
 --threads {threads} \
 --mem-gbytes {params.mem} \
-{input.gvcfs} | \
-bcftools view --threads {threads} -W=tbi -o {output[0]}
+{input.gvcfs} > {output.bcf}
+        '''
+
+rule bcftools_view:
+    input:
+        bcf = rules.GLnexus_merge.output['bcf']
+    output:
+        vcf = multiext('{run}/{region}.Unrevised.vcf.gz','','.tbi')
+    threads: 4
+    resources:
+        mem_mb_per_cpu = 2500,
+        runtime = '1h'
+    shell:
+        '''
+bcftools view \
+--threads {threads} \
+-W=tbi -o {output[0]} {input.bcf}
         '''
