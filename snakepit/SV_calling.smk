@@ -74,11 +74,11 @@ rule sawfish_joint_call:
         vcf = directory('SVs/sawfish/cohort')
     params:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
-        regions = ','.join(CHROMOSOMES)
-    threads: 8
+        regions = 1 #','.join(CHROMOSOMES)
+    threads: 12
     resources:
-        mem_mb_per_cpu = 6000,
-        runtime = '4h'
+        mem_mb_per_cpu = 30000,
+        runtime = '24h'
     shell:
         '''
 sawfish joint-call \
