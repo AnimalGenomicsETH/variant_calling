@@ -71,20 +71,19 @@ rule sawfish_joint_call:
     input:
         candidates = expand(rules.sawfish_discover.output['candidates'],sample=samples)
     output:
-        vcf = directory('SVs/sawfish/cohort')
+        vcf = directory('SVs/sawfish/cohort_{region}')
     params:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
-        regions = 1 #','.join(CHROMOSOMES)
-    threads: 12
+    threads: 8
     resources:
-        mem_mb_per_cpu = 30000,
+        mem_mb_per_cpu = 42500,
         runtime = '24h'
     shell:
         '''
 sawfish joint-call \
 --threads {threads} \
 --output-dir {output.vcf} \
---target-region {params.regions} \
+--target-region {wildcards.region} \
 {params.files}
         '''
 

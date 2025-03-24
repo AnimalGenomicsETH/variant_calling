@@ -30,7 +30,6 @@ alignment_metadata = pl.read_csv(config['alignment_metadata'])
 samples = alignment_metadata.get_column('sample ID')
 
 include: 'snakepit/deepvariant.smk'
-ruleorder: deepvariant_postprocess > bcftools_scatter
 include: 'snakepit/imputation.smk'
 include: 'snakepit/mendelian.smk'
 include: 'snakepit/SV_calling.smk'
@@ -50,11 +49,20 @@ def get_files():
             else:
                 postprocess_steps[step] = list(postprocess_steps.keys())[-1]
 
+        if config.get('split_then_merge',False):
+            ruleorder: bcftools_scatter > deepvariant_postprocess
+        else:
+            ruleorder: deepvariant_postprocess > bcftools_scatter
+
         if 'regions' in config:
             for region in regions:
                 targets.append(f"{config.get('run_name','DeepVariant')}/{region}.{config.get('imputed','Unrevised')}.vcf.gz")
         else:
-            targets.append(f"{config.get('run_name','DeepVariant')}/all.{config.get('imputed','Unrevised')}.vcf.gz")
+            if config.get('split_then_merge',False):
+                for region in regions:
+                    targets.append(f"{config.get('run_name','DeepVariant')}/{region}.{config.get('imputed','Unrevised')}.vcf.gz")
+            else:
+                targets.append(f"{config.get('run_name','DeepVariant')}/all.{config.get('imputed','Unrevised')}.vcf.gz")
 
     return targets
 
