@@ -30,6 +30,11 @@ alignment_metadata = pl.read_csv(config['alignment_metadata'])
 samples = alignment_metadata.get_column('sample ID')
 
 include: 'snakepit/deepvariant.smk'
+if config.get('split_then_merge',False):
+    ruleorder: bcftools_scatter > deepvariant_postprocess
+else:
+    ruleorder: deepvariant_postprocess > bcftools_scatter
+
 include: 'snakepit/imputation.smk'
 include: 'snakepit/mendelian.smk'
 include: 'snakepit/SV_calling.smk'
@@ -39,7 +44,8 @@ def get_files():
     targets = []
 
     if 'SV' in config.get('targets',[]):
-        targets.append('SVs/sawfish/cohort')
+        for region in regions:
+            targets.append(f'SVs/sawfish/cohort_{region}')
 
     if 'small' in config.get('targets',[]):
         postprocess_steps = {} #TODO: this is not good
@@ -48,11 +54,6 @@ def get_files():
                 postprocess_steps[step] = 'Unrevised'
             else:
                 postprocess_steps[step] = list(postprocess_steps.keys())[-1]
-
-        if config.get('split_then_merge',False):
-            ruleorder: bcftools_scatter > deepvariant_postprocess
-        else:
-            ruleorder: deepvariant_postprocess > bcftools_scatter
 
         if 'regions' in config:
             for region in regions:

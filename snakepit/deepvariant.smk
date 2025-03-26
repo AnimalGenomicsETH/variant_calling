@@ -12,7 +12,7 @@ def make_custom_example_arguments(model):
            #return small_model + '--channel_list BASE_CHANNELS,insert_size'
         case 'PACBIO':
             if config.get('small_model',False):
-                return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --noreal    ign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
+                return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
             else:
                 return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
         case 'MASSEQ': #no small model implemented
@@ -61,7 +61,7 @@ rule deepvariant_make_examples:
         bam =  get_sample_bam_path
     output:
         examples = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz'),
-        small = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples_call_variant_outputs.tfrecord-{N}-of-{sharding}.gz') if 'small_model' in config else [],
+        small = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples_call_variant_outputs.tfrecord-{N}-of-{sharding}.gz') if config.get('small_model',False) else [],
         gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz'),
         json = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz.example_info.json')
     params:
@@ -100,7 +100,7 @@ rule deepvariant_call_variants:
         model = get_checkpoint(config['model'])
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',4)
     resources:
-        mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
+        mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',5000),
         runtime = config.get('resources',{}).get('call_variants',{}).get('runtime','4h'),
     container: '/cluster/work/pausch/alex/software/images/deepvariant_1.8.0.sif'
     shell:
@@ -124,7 +124,7 @@ rule deepvariant_postprocess:
         variants = lambda wildcards,input: Path(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
         gvcf = lambda wildcards,input: Path(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"',
-        small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.variants).with_name(f"make_examples_call_variant_outputs.tfrecord@{config['shards']}")}' if config.get('small_model',False) else ''
+        small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.small[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config.get('small_model',False) else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',5000),
@@ -189,9 +189,9 @@ rule GLnexus_merge:
     output:
         bcf = '{run}/{region}.Unrevised.bcf'
     params:
-        preset = lambda wildcards: get_GL_config('Unrevised'),#wildcards.preset),
+        preset = lambda wildcards: get_GL_config('Unrevised'),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb_per_cpu']/1024
-    threads: config.get('resources',{}).get('merge',{}).get('threads',12),
+    threads: config.get('resources',{}).get('merge',{}).get('threads',4),
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
         runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h')
