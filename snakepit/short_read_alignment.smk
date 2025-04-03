@@ -1,35 +1,40 @@
-from pathlib import Path, PurePath
+from pathlib import Path
 
-def get_bam_extensions():
-    match config.get('cram'):
-        case 'cram':
-            return ('cram','cram.crai')
-        case 'bam':
-            return ('bam','bam.csi')
-        case 'both':
-            return ('cram','cram.crai','bam','bam.csi')
-        case _:
-            return ('bam','bam.csi')
+import polars as pl
+
+short_read_data = pl.read_csv(config['short_reads']).rows_by_key(key=["sample"]) if 'short_reads' in config else pl.DataFrame()
 
 rule all:
     input:
-        expand('alignments/{sample}.{caller}.{ext}',sample=config['samples'],ext=get_bam_extensions(),caller=config['aligners'])
+        expand('alignments/{sample}.{caller}.{ext}',sample=short_read_data,ext='bam',caller=config.get('aligners','bwa'))
 
 rule fastp_filter:
     input:
-        expand('input/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
+        fastq = lambda wildcards: short_read_data[wildcards.sample][0]
     output:
         fastq = expand('fastq/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
-    params: #Fancy way of handling if there is no fastp values in the configfile
-        min_quality = config.get('fastp',{}).get('min_quality',15),
-        unqualified = config.get('fastp',{}).get('unqualified',40),
-        min_length  = config.get('fastp',{}).get('min_length',15)
+    params:
+        min_quality = 15,
+        unqualified = 40,
+        min_length  = 50
     threads: 4
     resources:
-        mem_mb = 2500
+        mem_mb_per_cpu = 2500,
+        runtime = '4h'
     shell:
         '''
-        fastp -q {params.min_quality} -u {params.unqualified} -g --length_required {params.min_length} --thread {threads} -i {input[0]} -o {output.fastq[0]} -I {input[1]} -O {output.fastq[1]} --json /dev/null --html /dev/null
+fastp \
+--qualified_quality_phred {params.min_quality} \
+--unqualified_percent_limit {params.unqualified} \
+--trim_poly_g \
+--length_required {params.min_length} \
+--thread {threads} \
+--in1 {input.fastq[0]} \
+--out1 {output.fastq[0]} \
+--in2 {input.fastq[1]} \
+--out2 {output.fastq[1]} \
+--json /dev/null \
+--html /dev/null
         '''
 
 rule bwamem2_index:
@@ -41,7 +46,7 @@ rule bwamem2_index:
     resources:
         mem_mb = 85000
     shell:
-        'bwa-mem2 index {input}'
+        'bwa-mem2 index {input.reference}'
 
 #ASL: fixed read size (-r) at 150, may need changing for different batches
 rule strobealign_index:
@@ -56,7 +61,7 @@ rule strobealign_index:
         'strobealign {input} --create-index -t {threads} -r 150'
 
 def generate_aligner_command(aligner,input,threads):
-    index = PurePath(input.reference_index[0]).with_suffix('')
+    index = Path(input.reference_index[0]).with_suffix('')
     match aligner:
         case 'strobe':
             return f'strobealign {index} {input.fastq} --use-index -t {threads} -r 150'
@@ -72,22 +77,22 @@ rule aligner:
     input:
         fastq = rules.fastp_filter.output,
         reference_index = lambda wildcards: rules.strobealign_index.output if wildcards.aligner == 'strobe' else rules.bwamem2_index.output,
-        reference = config['reference']
+        reference = lambda wildcards: [] if wildcards.EXT == 'bam' else config['reference']
     output:
-        bam = expand('alignments/{sample}.{aligner}.{ext}',ext=get_bam_extensions(),allow_missing=True),
-        dedup_stats = 'alignments/{sample}.{aligner}.dedup.stats'
+        bam = expand('alignments/{sample}.{aligner}.{EXT,cram|bam}',allow_missing=True),
+        dedup_stats = 'alignments/{sample}.{aligner}.{EXT}.dedup.stats'
     params:
-        aligner_command = lambda wildcards, input, threads: generate_aligner_command(wildcards.aligner,input,threads)
-    threads: 8
+        aligner_command = lambda wildcards, input, threads: generate_aligner_command(wildcards.aligner,input,threads),
+        cram = lambda wildcards, input: f'--output-fmt-option version=3.1  --reference {input.reference}' if wildcards.EXT == 'cram' else ''
+    threads: 16
     resources:
-        mem_mb = 3000,
-        scratch = '50G',
-        walltime = '24:00'
+        mem_mb_per_cpu = 4000,
+        runtime = '24h'
     shell:
         '''
         {params.aligner_command} |\
         samtools collate -u -O -@ 6 - |\
         samtools fixmate -m -u -@ 6 - - |\
         samtools sort -T $TMPDIR -u -@ 6 |\
-        samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} --reference {input.reference} - {output.bam[0]}
+        samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
         '''

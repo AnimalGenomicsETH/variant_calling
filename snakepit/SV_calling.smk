@@ -24,8 +24,6 @@ rule pbsv_call:
     shell:
         'pbsv call --hifi -j {threads} {config[reference]} {input.signatures} {output}'
 
-CHROMOSOMES = list(map(str,range(1,30))) + ['X','Y','MT']
-
 from pathlib import Path
 ## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
 def get_sample_bam_path(wildcards):
@@ -49,8 +47,9 @@ rule sawfish_discover:
     output:
         candidates = directory('SVs/sawfish/{sample}')
     params:
-        regions = ','.join(CHROMOSOMES),
-        PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else ''
+        regions = ','.join(regions),
+        PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else '',
+        autosomes_regex = r'\d+'
     threads: 8
     resources:
         mem_mb_per_cpu = 9000,
@@ -63,7 +62,7 @@ sawfish discover \
 --ref {input.reference} \
 --bam {input.bam[0]} \
 --target-region {params.regions} \
---cov-regex "^\\d+" \
+--cov-regex "{params.autosomes_regex}" \
 {params.PAR}
         '''
 
@@ -76,7 +75,7 @@ rule sawfish_joint_call:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
     threads: 8
     resources:
-        mem_mb_per_cpu = 42500,
+        mem_mb_per_cpu = 4500,
         runtime = '24h'
     shell:
         '''
