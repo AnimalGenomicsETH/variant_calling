@@ -1,16 +1,12 @@
-from pathlib import Path, PurePath
+from pathlib import Path
 import polars as pl
 
 wildcard_constraints:
     region = r'[\w\.]+',
-    sample = r'\w+',
+    sample = r'[\w-]+',
     run = r'\w+',
     filtration = r'Unrevised_filtered|beagle4',
     N = r'\d+',
-
-if 'binding_paths' in config:
-    for path in config['binding_paths']:
-        workflow._singularity_args += f' -B {path}'
 
 from collections import defaultdict
 def build_regions():
