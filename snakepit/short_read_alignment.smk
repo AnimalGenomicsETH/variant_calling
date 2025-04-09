@@ -96,3 +96,57 @@ rule aligner:
         samtools sort -T $TMPDIR -u -@ 6 |\
         samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
         '''
+
+rule STAR_index:
+    input:
+        reference = '',
+        GTF = ''
+    output:
+        index = directory('')
+    threads: 4
+    shell:
+        '''
+STAR \
+--runMode genomeGenerate \
+--genomeFastaFiles {input.reference} \
+--sjdbGTFfile {input.GTF} \
+--genomeDir {output.index} \
+--runThreadN {threads} \
+--sjdbOverhang 100
+        '''
+
+#--sjdbGTFfile {input.GTF} \
+#--sjdbOverhang 100 \
+rule STAR_align:
+	input:
+        fastq = "{sample}/{sample}_{flowcell}_{lane}_R1.fq.gz", #TODO: fastp RNA flags
+        index = rules.STAR_index.output['index'],
+		vcf = "{sample}.snps.het.vcf.gz",
+		GTF = "{ref}/STAR/{ref}.cattle.gtf"
+	output:
+        bam = multiext(alignment + "{ref}/{sample}/{sample}_{flowcell}_{lane}.bam","",".bai")
+	resources:
+		mem_mb_per_cpu = 7000,
+		runtime = "4h"
+	threads: 16
+	params:
+		rg = "SO=coordinate RGID={flowcell}:{lane} RGLB={sample}.0 RGPL=ILLUMINA RGPU=hiseq RGSM={sample} RGCN=FGCZ "
+    shell:
+		'''
+STAR \
+--runMode alignReads \
+--twopassMode Basic \
+--genomeDir {input.index} \
+--readFilesIn {input.fastq} \
+--readFilesCommand zcat \
+--varVCFfile <(bcftools view -s {wildcards.sample} -v snps {input.het_vcf} #TODO: FIX as full command) \
+--outTmpDir $TMPDIR \
+--runThreadN {threads} \
+--outSAMmapqUnique 60 \
+--waspOutputMode SAMtag \
+--outMultimapperOrder Random \
+--outSAMattrRGline {params.rg} \
+--outSAMtype BAM SortedByCoordinate
+
+samtools index -@ {threads} {output.bam[0]}
+		'''
