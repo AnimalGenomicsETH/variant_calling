@@ -9,7 +9,6 @@ def make_custom_example_arguments(model):
                 return '--checkpoint "/opt/models/wgs" --call_small_model_examples --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --trained_small_model_path "/opt/smallmodels/wgs"'
             else:
                 return '--checkpoint "/opt/models/wgs"'
-           #return small_model + '--channel_list BASE_CHANNELS,insert_size'
         case 'PACBIO':
             if config.get('small_model',False):
                 return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
@@ -22,8 +21,8 @@ def make_custom_example_arguments(model):
                 return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norea    lign_reads --small_model_indel_gq_threshold "25" --small_model_snp_gq_threshold "20" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/ont_r104" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"     --vsc_min_fraction_snps "0.08"'
             else:
                 return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" --vsc_min_fraction_snps "0.08"'
-        case 'RNA' | 'WES' | _:
-            return '--channel_list BASE_CHANNELS --split_skip_reads'
+        case 'RNA' | 'WES' | _: #only valid for v1.4-v1.5
+            return '--channel_list  "" --split_skip_reads'
 
 def get_checkpoint(model):
     path = f'/opt/models/'
@@ -73,7 +72,7 @@ rule deepvariant_make_examples:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
         runtime = config.get('resources',{}).get('make_examples',{}).get('runtime','4h'),
-    container: '/cluster/work/pausch/alex/software/images/deepvariant_1.8.0.sif'
+    container: config['deepvariant_sif']
     shell:
         '''
 /opt/deepvariant/bin/make_examples \
@@ -102,7 +101,7 @@ rule deepvariant_call_variants:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',5000),
         runtime = config.get('resources',{}).get('call_variants',{}).get('runtime','4h'),
-    container: '/cluster/work/pausch/alex/software/images/deepvariant_1.8.0.sif'
+    container: config['deepvariant_sif']
     shell:
         '''
 /opt/deepvariant/bin/call_variants \
@@ -129,7 +128,7 @@ rule deepvariant_postprocess:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',5000),
         runtime = config.get('resources',{}).get('postprocess',{}).get('runtime','4h'),
-    container: '/cluster/work/pausch/alex/software/images/deepvariant_1.8.0.sif'
+    container: config['deepvariant_sif']
     shell:
         '''
 /opt/deepvariant/bin/postprocess_variants \
@@ -195,7 +194,7 @@ rule GLnexus_merge:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
         runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h')
-    container: '/cluster/work/pausch/alex/software/images/glnexus_v1.4.1.sif'
+    container: config['glnexus_sif']
     shell:
         '''
 /usr/local/bin/glnexus_cli \
@@ -219,5 +218,7 @@ rule bcftools_view:
         '''
 bcftools view \
 --threads {threads} \
--W=tbi -o {output[0]} {input.bcf}
+--write-index=tbi \
+--output {output[0]} \
+{input.bcf}
         '''

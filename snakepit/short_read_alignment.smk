@@ -16,7 +16,8 @@ rule fastp_filter:
     params:
         min_quality = 15,
         unqualified = 40,
-        min_length  = 50
+        min_length  = 50,
+        poly_x = '' if config.get('RNA',False) else '--trim_poly_x'
     threads: 4
     resources:
         mem_mb_per_cpu = 2500,
@@ -24,9 +25,10 @@ rule fastp_filter:
     shell:
         '''
 fastp \
+--dont_eval_duplication \
 --qualified_quality_phred {params.min_quality} \
 --unqualified_percent_limit {params.unqualified} \
---trim_poly_g \
+--trim_poly_g  {params.poly_x} \
 --length_required {params.min_length} \
 --thread {threads} \
 --in1 {input.fastq[0]} \
@@ -79,7 +81,7 @@ rule aligner:
         reference_index = lambda wildcards: rules.strobealign_index.output if wildcards.aligner == 'strobe' else rules.bwamem2_index.output,
         reference = lambda wildcards: [] if wildcards.EXT == 'bam' else config['reference']
     output:
-        bam = expand('alignments/{sample}.{aligner}.{EXT,cram|bam}',allow_missing=True),
+        bam = 'alignments/{sample}.{aligner}.{EXT,cram|bam}',
         dedup_stats = 'alignments/{sample}.{aligner}.{EXT}.dedup.stats'
     params:
         aligner_command = lambda wildcards, input, threads: generate_aligner_command(wildcards.aligner,input,threads),
@@ -90,20 +92,23 @@ rule aligner:
         runtime = '24h'
     shell:
         '''
-        {params.aligner_command} |\
-        samtools collate -u -O -@ 6 - |\
-        samtools fixmate -m -u -@ 6 - - |\
-        samtools sort -T $TMPDIR -u -@ 6 |\
-        samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
+{params.aligner_command} |\
+samtools collate -u -O -@ 6 - |\
+samtools fixmate -m -u -@ 6 - - |\
+samtools sort -T $TMPDIR -u -@ 6 |\
+samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
         '''
 
 rule STAR_index:
     input:
-        reference = '',
-        GTF = ''
+        reference = config['reference'],
+        GTF = config['GTF']
     output:
-        index = directory('')
+        index = directory('STAR/reference')
     threads: 4
+    resources:
+		mem_mb_per_cpu = 5000,
+		runtime = "4h"
     shell:
         '''
 STAR \
@@ -119,34 +124,42 @@ STAR \
 #--sjdbOverhang 100 \
 rule STAR_align:
 	input:
-        fastq = "{sample}/{sample}_{flowcell}_{lane}_R1.fq.gz", #TODO: fastp RNA flags
+        fastq = rules.fastp_filter.output['fastq'],
         index = rules.STAR_index.output['index'],
-		vcf = "{sample}.snps.het.vcf.gz",
-		GTF = "{ref}/STAR/{ref}.cattle.gtf"
+		vcf = config['VCF']
 	output:
-        bam = multiext(alignment + "{ref}/{sample}/{sample}_{flowcell}_{lane}.bam","",".bai")
+        bam = multiext('alignments/{sample}.STAR.bam','','.csi'),
+        dedup_stats = 'alignments/{sample}.STAR.dedup.stats'
+    threads: 16
 	resources:
 		mem_mb_per_cpu = 7000,
 		runtime = "4h"
-	threads: 16
-	params:
-		rg = "SO=coordinate RGID={flowcell}:{lane} RGLB={sample}.0 RGPL=ILLUMINA RGPU=hiseq RGSM={sample} RGCN=FGCZ "
     shell:
 		'''
+bcftools view \
+--samples {wildcards.sample} \
+--types snps \
+--genotype het \
+{input.het_vcf} > $TMPDIR/heterozygotes.vcf
+
 STAR \
 --runMode alignReads \
 --twopassMode Basic \
 --genomeDir {input.index} \
 --readFilesIn {input.fastq} \
 --readFilesCommand zcat \
---varVCFfile <(bcftools view -s {wildcards.sample} -v snps {input.het_vcf} #TODO: FIX as full command) \
+--varVCFfile $TMPDIR/heterozygotes.vcf \
 --outTmpDir $TMPDIR \
 --runThreadN {threads} \
 --outSAMmapqUnique 60 \
 --waspOutputMode SAMtag \
 --outMultimapperOrder Random \
 --outSAMattrRGline {params.rg} \
---outSAMtype BAM SortedByCoordinate
+--outStd SAM |
+samtools collate -u -O -@ 6 - |\
+samtools fixmate -m -u -@ 6 - - |\
+samtools sort -T $TMPDIR -u -@ 6 |\
+samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} - {output.bam[0]}
 
-samtools index -@ {threads} {output.bam[0]}
+#samtools view -e '![vW] || [vW]==1' -o {output[0]} --write-index -t {threads} {input.bam}
 		'''
