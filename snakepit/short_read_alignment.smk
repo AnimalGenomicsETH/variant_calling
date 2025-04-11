@@ -107,14 +107,15 @@ rule STAR_index:
         index = directory('STAR/reference')
     threads: 4
     resources:
-		mem_mb_per_cpu = 5000,
-		runtime = "4h"
+        mem_mb_per_cpu = 15000,
+        runtime = "4h"
     shell:
         '''
 STAR \
 --runMode genomeGenerate \
 --genomeFastaFiles {input.reference} \
 --sjdbGTFfile {input.GTF} \
+--outTmpDir $TMPDIR/STAR \
 --genomeDir {output.index} \
 --runThreadN {threads} \
 --sjdbOverhang 100
@@ -122,25 +123,28 @@ STAR \
 
 #--sjdbGTFfile {input.GTF} \
 #--sjdbOverhang 100 \
+#--outSAMattrRGline {params.rg} \
+#--outFileNamePrefix $TMPDIR \
 rule STAR_align:
-	input:
+    input:
         fastq = rules.fastp_filter.output['fastq'],
         index = rules.STAR_index.output['index'],
-		vcf = config['VCF']
-	output:
+        vcf = config['VCF']
+    output:
         bam = multiext('alignments/{sample}.STAR.bam','','.csi'),
         dedup_stats = 'alignments/{sample}.STAR.dedup.stats'
-    threads: 16
-	resources:
-		mem_mb_per_cpu = 7000,
-		runtime = "4h"
+    threads: 12
+    resources:
+        mem_mb_per_cpu = 7000,
+        runtime = "24h"
     shell:
-		'''
+        '''
 bcftools view \
 --samples {wildcards.sample} \
 --types snps \
 --genotype het \
-{input.het_vcf} > $TMPDIR/heterozygotes.vcf
+--threads {threads} \
+{input.vcf} > $TMPDIR/heterozygotes.vcf
 
 STAR \
 --runMode alignReads \
@@ -149,17 +153,18 @@ STAR \
 --readFilesIn {input.fastq} \
 --readFilesCommand zcat \
 --varVCFfile $TMPDIR/heterozygotes.vcf \
---outTmpDir $TMPDIR \
+--outTmpDir $TMPDIR/STAR \
 --runThreadN {threads} \
 --outSAMmapqUnique 60 \
 --waspOutputMode SAMtag \
 --outMultimapperOrder Random \
---outSAMattrRGline {params.rg} \
---outStd SAM |
+--outFileNamePrefix $TMPDIR \
+--outSAMtype SAM \
+--outStd SAM |\
 samtools collate -u -O -@ 6 - |\
 samtools fixmate -m -u -@ 6 - - |\
 samtools sort -T $TMPDIR -u -@ 6 |\
 samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} - {output.bam[0]}
 
-#samtools view -e '![vW] || [vW]==1' -o {output[0]} --write-index -t {threads} {input.bam}
-		'''
+#samtools view -e '![vW] || [vW]==1' -o {output[0]} --write-index -t {threads} {output.bam}
+        '''

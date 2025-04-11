@@ -22,7 +22,7 @@ def make_custom_example_arguments(model):
             else:
                 return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" --vsc_min_fraction_snps "0.08"'
         case 'RNA' | 'WES' | _: #only valid for v1.4-v1.5
-            return '--channel_list  "" --split_skip_reads'
+            return '--channels "" --split_skip_reads'
 
 def get_checkpoint(model):
     path = f'/opt/models/'
@@ -32,7 +32,7 @@ def get_checkpoint(model):
         case 'hybrid':
             return path + 'hybrid_pacbio_illumina'
         case _:
-            return config['model']
+            return config['custom_model']
 
 def get_regions(wildcards):
     if wildcards.region == 'all':
@@ -123,7 +123,9 @@ rule deepvariant_postprocess:
         variants = lambda wildcards,input: Path(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
         gvcf = lambda wildcards,input: Path(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"',
-        small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.small[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config.get('small_model',False) else ''
+        small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.small[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config.get('small_model',False) else '',
+        #this is a workaround to allow older versions without parallel postprocessing to not complain
+        cpus = '--cpus {threads}' if config.get('resources',{}).get('postprocess',{}).get('threads',1) > 1 else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',5000),
@@ -140,7 +142,7 @@ rule deepvariant_postprocess:
 --novcf_stats_report \
 {params.small_model} \
 {params.handle_sex_chromosomes} \
---cpus {threads}
+{params.cpus}
         '''
 
 rule bcftools_scatter:

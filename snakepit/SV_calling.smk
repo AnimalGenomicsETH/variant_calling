@@ -52,7 +52,7 @@ rule sawfish_discover:
         autosomes_regex = r'\d+'
     threads: 8
     resources:
-        mem_mb_per_cpu = 9000,
+        mem_mb_per_cpu = 17500,
         runtime = '24h'
     shell:
         '''
@@ -75,7 +75,7 @@ rule sawfish_joint_call:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
     threads: 8
     resources:
-        mem_mb_per_cpu = 4500,
+        mem_mb_per_cpu = 9000,
         runtime = '24h'
     shell:
         '''
