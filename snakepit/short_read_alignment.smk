@@ -79,24 +79,39 @@ rule aligner:
     input:
         fastq = rules.fastp_filter.output,
         reference_index = lambda wildcards: rules.strobealign_index.output if wildcards.aligner == 'strobe' else rules.bwamem2_index.output,
-        reference = lambda wildcards: [] if wildcards.EXT == 'bam' else config['reference']
+        #reference = lambda wildcards: [] if wildcards.EXT == 'bam' else config['reference']
     output:
-        bam = 'alignments/{sample}.{aligner}.{EXT,cram|bam}',
-        dedup_stats = 'alignments/{sample}.{aligner}.{EXT}.dedup.stats'
+        sam = pipe('alignments/{sample}.{aligner,bwa|strobe}.sam')
     params:
         aligner_command = lambda wildcards, input, threads: generate_aligner_command(wildcards.aligner,input,threads),
-        cram = lambda wildcards, input: f'--output-fmt-option version=3.1  --reference {input.reference}' if wildcards.EXT == 'cram' else ''
+        #cram = lambda wildcards, input: f'--output-fmt-option version=3.1  --reference {input.reference}' if wildcards.EXT == 'cram' else ''
     threads: 16
     resources:
         mem_mb_per_cpu = 4000,
         runtime = '24h'
     shell:
         '''
-{params.aligner_command} |\
-samtools collate -u -O -@ 6 - |\
-samtools fixmate -m -u -@ 6 - - |\
-samtools sort -T $TMPDIR -u -@ 6 |\
-samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
+{params.aligner_command}
+        '''
+
+rule samtools_markdup:
+    input:
+        sam = 'alignments/{sample}.{aligner}.sam'
+    output:
+        bam = 'alignments/{sample}.{aligner}.{EXT,cram|bam}',
+        dedup_stats = 'alignments/{sample}.{aligner}.{EXT}.dedup.stats'
+    params:
+        cram = lambda wildcards, input: f'--output-fmt-option version=3.1  --reference {input.reference}' if wildcards.EXT == 'cram' else ''
+    threads: 4
+    resources:
+        mem_mb_per_cpu = 5000,
+        runtime = '1h'
+    shell:
+        '''
+samtools collate -@  -O -u /dev/stdin {input.sam} |\
+samtools fixmate -@ {threads} -m -u /dev/stdin /dev/stdout |\
+samtools sort -@ {threads} -T $TMPDIR -u |\
+samtools markdup -@ {threads} -T $TMPDIR -S --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
         '''
 
 rule STAR_index:
@@ -121,18 +136,14 @@ STAR \
 --sjdbOverhang 100
         '''
 
-#--sjdbGTFfile {input.GTF} \
-#--sjdbOverhang 100 \
-#--outSAMattrRGline {params.rg} \
-#--outFileNamePrefix $TMPDIR \
+#samtools view -e '![vW] || [vW]==1' -o {output[0]} --write-index -t {threads} {output.bam}
 rule STAR_align:
     input:
         fastq = rules.fastp_filter.output['fastq'],
         index = rules.STAR_index.output['index'],
         vcf = config['VCF']
     output:
-        bam = multiext('alignments/{sample}.STAR.bam','','.csi'),
-        dedup_stats = 'alignments/{sample}.STAR.dedup.stats'
+        sam = pipe('alignments/{sample}.STAR.sam')
     threads: 12
     resources:
         mem_mb_per_cpu = 7000,
@@ -160,11 +171,5 @@ STAR \
 --outMultimapperOrder Random \
 --outFileNamePrefix $TMPDIR \
 --outSAMtype SAM \
---outStd SAM |\
-samtools collate -u -O -@ 6 - |\
-samtools fixmate -m -u -@ 6 - - |\
-samtools sort -T $TMPDIR -u -@ 6 |\
-samtools markdup -T $TMPDIR -S -@ 6 --write-index -f {output.dedup_stats} - {output.bam[0]}
-
-#samtools view -e '![vW] || [vW]==1' -o {output[0]} --write-index -t {threads} {output.bam}
+--outStd SAM
         '''
