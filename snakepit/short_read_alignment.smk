@@ -50,50 +50,32 @@ rule bwamem2_index:
     shell:
         'bwa-mem2 index {input.reference}'
 
-#ASL: fixed read size (-r) at 150, may need changing for different batches
-rule strobealign_index:
+#index on the fly, as it is read length dependent but also quick
+rule strobealign_align:
     input:
-        reference = config['reference']
+        reference = config['reference'],
+        fastq = ''
     output:
-        temp(config['reference'] + '.sti')
-    threads: 4
-    resources:
-        mem_mb = 8000
+        sam = pipe('alignments/{sample}.strobe.sam')
     shell:
-        'strobealign {input} --create-index -t {threads} -r 150'
+        '''
+strobealign {input.reference} {input.fastq} -t {threads}
+        '''
 
-def generate_aligner_command(aligner,input,threads):
-    index = Path(input.reference_index[0]).with_suffix('')
-    match aligner:
-        case 'strobe':
-            return f'strobealign {index} {input.fastq} --use-index -t {threads} -r 150'
-        case 'bwa':
-            return f'bwa-mem2 mem -Y -t {threads} {index} {input.fastq}'
-        case _:
-            raise('Unknown aligner')
+rule bwamem2_align:
+    input:
+        index = '',
+        fastq = ''
+    output:
+        sam = pipe('alignments/{sample}.bwa.sam')
+    shell:
+        '''
+bwa-mem2 mem -Y -t {threads} {input.index} {input.fastq}
+        '''
 
 #NOTE: markdup -S flag marks supplementary alignments of duplicates as duplicates.
 #NOTE: readgroup as an additional tag is seemingly unused now, so removed.
 #This now selects the alignment code using the "generate_aligner_command" function, and then pipes through samtools.
-rule aligner:
-    input:
-        fastq = rules.fastp_filter.output,
-        reference_index = lambda wildcards: rules.strobealign_index.output if wildcards.aligner == 'strobe' else rules.bwamem2_index.output,
-        #reference = lambda wildcards: [] if wildcards.EXT == 'bam' else config['reference']
-    output:
-        sam = pipe('alignments/{sample}.{aligner,bwa|strobe}.sam')
-    params:
-        aligner_command = lambda wildcards, input, threads: generate_aligner_command(wildcards.aligner,input,threads),
-        #cram = lambda wildcards, input: f'--output-fmt-option version=3.1  --reference {input.reference}' if wildcards.EXT == 'cram' else ''
-    threads: 16
-    resources:
-        mem_mb_per_cpu = 4000,
-        runtime = '24h'
-    shell:
-        '''
-{params.aligner_command}
-        '''
-
 rule samtools_markdup:
     input:
         sam = 'alignments/{sample}.{aligner}.sam'
@@ -102,13 +84,13 @@ rule samtools_markdup:
         dedup_stats = 'alignments/{sample}.{aligner}.{EXT}.dedup.stats'
     params:
         cram = lambda wildcards, input: f'--output-fmt-option version=3.1  --reference {input.reference}' if wildcards.EXT == 'cram' else ''
-    threads: 4
+    threads: 2
     resources:
-        mem_mb_per_cpu = 5000,
+        mem_mb_per_cpu = 1000,
         runtime = '1h'
     shell:
         '''
-samtools collate -@  -O -u /dev/stdin {input.sam} |\
+samtools collate -@ {threads} -O -u {input.sam} |\
 samtools fixmate -@ {threads} -m -u /dev/stdin /dev/stdout |\
 samtools sort -@ {threads} -T $TMPDIR -u |\
 samtools markdup -@ {threads} -T $TMPDIR -S --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
@@ -146,8 +128,8 @@ rule STAR_align:
         sam = pipe('alignments/{sample}.STAR.sam')
     threads: 12
     resources:
-        mem_mb_per_cpu = 7000,
-        runtime = "24h"
+        mem_mb_per_cpu = 4000,
+        runtime = "12h"
     shell:
         '''
 bcftools view \
