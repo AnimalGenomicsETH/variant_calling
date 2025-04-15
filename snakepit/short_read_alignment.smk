@@ -43,34 +43,34 @@ rule bwamem2_index:
     input:
         reference = config['reference']
     output:
-        temp(multiext(config['reference'],'.0123','.amb','.ann','.bwt.2bit.64','.pac'))
+        index = temp(multiext(config['reference'],'.0123','.amb','.ann','.bwt.2bit.64','.pac'))
     threads: 1
     resources:
         mem_mb = 85000
     shell:
         'bwa-mem2 index {input.reference}'
 
-#index on the fly, as it is read length dependent but also quick
+#Strobealign is quick to index on the fly and removes read-length dependency
 rule strobealign_align:
     input:
         reference = config['reference'],
-        fastq = ''
+        fastq = rules.fastp_filter.output['fastq']
     output:
         sam = pipe('alignments/{sample}.strobe.sam')
     shell:
         '''
-strobealign {input.reference} {input.fastq} -t {threads}
+strobealign {input.reference} {input.fastq} -t {threads} > {output.sam}
         '''
 
 rule bwamem2_align:
     input:
-        index = '',
-        fastq = ''
+        index = rules.bwamem2_index.output['index'],
+        fastq = rules.fastp_filter.output['fastq']
     output:
         sam = pipe('alignments/{sample}.bwa.sam')
     shell:
         '''
-bwa-mem2 mem -Y -t {threads} {input.index} {input.fastq}
+bwa-mem2 mem -Y -t {threads} {input.index} {input.fastq} > {output.sam}
         '''
 
 #NOTE: markdup -S flag marks supplementary alignments of duplicates as duplicates.
@@ -93,7 +93,7 @@ rule samtools_markdup:
 samtools collate -@ {threads} -O -u {input.sam} |\
 samtools fixmate -@ {threads} -m -u /dev/stdin /dev/stdout |\
 samtools sort -@ {threads} -T $TMPDIR -u |\
-samtools markdup -@ {threads} -T $TMPDIR -S --write-index -f {output.dedup_stats} {params.cram} - {output.bam[0]}
+samtools markdup -@ {threads} -T $TMPDIR -S --write-index -f {output.dedup_stats} {params.cram} /dev/stdin {output.bam}
         '''
 
 rule STAR_index:
@@ -129,7 +129,7 @@ rule STAR_align:
     threads: 12
     resources:
         mem_mb_per_cpu = 4000,
-        runtime = "12h"
+        runtime = "4h"
     shell:
         '''
 bcftools view \
@@ -153,5 +153,5 @@ STAR \
 --outMultimapperOrder Random \
 --outFileNamePrefix $TMPDIR \
 --outSAMtype SAM \
---outStd SAM
+--outStd SAM > {output.sam}
         '''
