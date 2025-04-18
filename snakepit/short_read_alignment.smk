@@ -155,3 +155,27 @@ STAR \
 --outSAMtype SAM \
 --outStd SAM > {output.sam}
         '''
+
+rule paftools_gff2bed:
+    input:
+        GTF = config['GTF']
+    output:
+        bed = 'mm2.bed' #rename eventually
+    localrule: True
+    shell:
+        '''
+paftools.js gff2bed {input.GTF} > {output.bed}
+        '''
+
+rule minimap2_align_RNA:
+    input:
+       fastq = rules.fastp_filter.output['fastq'],
+       reference = config['reference'],
+       bed = rules.paftools_gff2bed.output['bed']
+    output:
+        sam = pipe('alignments/{sample}.mm2.sam')
+    shell:
+        '''
+minimap2 -t {threads} -x splice:sr -j {input.bed} --write-junc {input.reference} {input.fastq} > $TMPDIR.bed
+minimap2 -t {threads} -ax splice:sr -j {input.bed} --pass1=$TMPDIR.bed {input.reference} {input.fastq} > {output.sam}
+        '''
