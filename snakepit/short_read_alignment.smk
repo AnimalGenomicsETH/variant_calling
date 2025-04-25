@@ -1,16 +1,14 @@
-from pathlib import Path
-
 import polars as pl
 
-short_read_data = pl.read_csv(config['short_reads']).rows_by_key(key=["sample"]) if 'short_reads' in config else pl.DataFrame()
+short_read_data = pl.read_csv(config['short_reads']).rows_by_key(key=["sample"],unique=True) if 'short_reads' in config else pl.DataFrame()
 
 rule all:
     input:
-        expand('alignments/{sample}.{caller}.{ext}',sample=short_read_data,ext='bam',caller=config.get('aligners','bwa'))
+        expand('alignments/{sample}.{aligner}.{ext}',sample=short_read_data,ext='bam',aligner=config.get('aligners','bwa'))
 
 rule fastp_filter:
     input:
-        fastq = lambda wildcards: short_read_data[wildcards.sample][0]
+        fastq = lambda wildcards: short_read_data[wildcards.sample]
     output:
         fastq = expand('fastq/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
     params:
@@ -123,33 +121,27 @@ rule STAR_align:
     input:
         fastq = rules.fastp_filter.output['fastq'],
         index = rules.STAR_index.output['index'],
-        vcf = config['VCF']
+        vcf = config['VCF'] if config.get('WASP',False) else []
     output:
         sam = pipe('alignments/{sample}.STAR.sam')
-    threads: 12
+    params:
+        WASP = lambda wildcards, input, threads: '--waspOutputMode SAMtag --varVCFfile <(bcftools view --samples {wildcards.sample} --types snps --genotype het --threads 4 {input.vcf})' if config.get('WASP',False) else ''
+    threads: 10
     resources:
         mem_mb_per_cpu = 4000,
         runtime = "4h"
     shell:
         '''
-bcftools view \
---samples {wildcards.sample} \
---types snps \
---genotype het \
---threads {threads} \
-{input.vcf} > $TMPDIR/heterozygotes.vcf
-
 STAR \
 --runMode alignReads \
 --twopassMode Basic \
 --genomeDir {input.index} \
 --readFilesIn {input.fastq} \
 --readFilesCommand zcat \
---varVCFfile $TMPDIR/heterozygotes.vcf \
+{params.WASP} \
 --outTmpDir $TMPDIR/STAR \
 --runThreadN {threads} \
 --outSAMmapqUnique 60 \
---waspOutputMode SAMtag \
 --outMultimapperOrder Random \
 --outFileNamePrefix $TMPDIR \
 --outSAMtype SAM \
