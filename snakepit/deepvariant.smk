@@ -72,7 +72,7 @@ rule deepvariant_make_examples:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
         runtime = config.get('resources',{}).get('make_examples',{}).get('runtime','4h'),
-    container: config['deepvariant_sif']
+    container: config.get('deepvariant_sif')
     shell:
         '''
 /opt/deepvariant/bin/make_examples \
@@ -101,7 +101,7 @@ rule deepvariant_call_variants:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',5000),
         runtime = config.get('resources',{}).get('call_variants',{}).get('runtime','4h'),
-    container: config['deepvariant_sif']
+    container: config.get('deepvariant_sif')
     shell:
         '''
 /opt/deepvariant/bin/call_variants \
@@ -125,12 +125,12 @@ rule deepvariant_postprocess:
         handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"',
         small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.small[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config.get('small_model',False) else '',
         #this is a workaround to allow older versions without parallel postprocessing to not complain
-        cpus = '--cpus {threads}' if config.get('resources',{}).get('postprocess',{}).get('threads',1) > 1 else ''
+        cpus = lambda wildcards, threads: '--cpus {threads}' if config.get('resources',{}).get('postprocess',{}).get('threads',1) > 1 else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',5000),
         runtime = config.get('resources',{}).get('postprocess',{}).get('runtime','4h'),
-    container: config['deepvariant_sif']
+    container: config.get('deepvariant_sif')
     shell:
         '''
 /opt/deepvariant/bin/postprocess_variants \
@@ -196,7 +196,7 @@ rule GLnexus_merge:
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
         runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h')
-    container: config['glnexus_sif']
+    container: config.get('glnexus_sif')
     shell:
         '''
 /usr/local/bin/glnexus_cli \

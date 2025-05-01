@@ -97,7 +97,7 @@ samtools markdup -@ {threads} -T $TMPDIR -S --write-index -f {output.dedup_stats
 rule STAR_index:
     input:
         reference = config['reference'],
-        GTF = config['GTF']
+        GTF = config.get('GTF',[])
     output:
         index = directory('STAR/reference')
     threads: 4
@@ -150,7 +150,7 @@ STAR \
 
 rule paftools_gff2bed:
     input:
-        GTF = config['GTF']
+        GTF = config.get('GTF',[])
     output:
         bed = 'mm2.bed' #rename eventually
     localrule: True
