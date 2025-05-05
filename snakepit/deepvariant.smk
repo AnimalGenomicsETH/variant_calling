@@ -125,7 +125,7 @@ rule deepvariant_postprocess:
         handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"',
         small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.small[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config.get('small_model',False) else '',
         #this is a workaround to allow older versions without parallel postprocessing to not complain
-        cpus = lambda wildcards, threads: '--cpus {threads}' if config.get('resources',{}).get('postprocess',{}).get('threads',1) > 1 else ''
+        cpus = lambda wildcards, threads: f'--cpus {threads}' if config.get('resources',{}).get('postprocess',{}).get('threads',1) > 1 else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
     resources:
         mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',5000),
