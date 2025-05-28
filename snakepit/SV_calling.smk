@@ -39,6 +39,7 @@ def get_sample_bam_path(wildcards):
                 return bam, f"{bam}.crai"
     raise Exception(f"BAM file ({bam}) is not indexed.")
 
+#--maf <deepvariant_vcf>?
 rule sawfish_discover:
     input:
         bam = get_sample_bam_path,
@@ -49,7 +50,7 @@ rule sawfish_discover:
     params:
         regions = ','.join(regions),
         PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else '',
-        autosomes_regex = r'\d+'
+        autosomes_regex = r'^(chr)?\d{1,2}$'
     threads: 8
     resources:
         mem_mb_per_cpu = 17500,
@@ -75,7 +76,7 @@ rule sawfish_joint_call:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
     threads: 8
     resources:
-        mem_mb_per_cpu = 9000,
+        mem_mb_per_cpu = 15000,
         runtime = '24h'
     shell:
         '''
