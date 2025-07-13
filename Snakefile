@@ -22,7 +22,7 @@ def build_regions():
     return dict(region_map)
 
 regions = build_regions()
-alignment_metadata = pl.read_csv(config['alignment_metadata'])
+alignment_metadata = pl.read_csv(config['alignment_metadata'],comment_prefix='#')
 samples = alignment_metadata.get_column('sample ID')
 
 include: 'snakepit/deepvariant.smk'

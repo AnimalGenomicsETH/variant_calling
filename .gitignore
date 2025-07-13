@@ -18,6 +18,7 @@ config/*
 
 !scripts
 scripts/*
+!scripts/*.sh
 !scripts/*.py
 !scripts/*.css
 
