@@ -39,7 +39,7 @@ def get_sample_bam_path(wildcards):
                 return bam, f"{bam}.crai"
     raise Exception(f"BAM file ({bam}) is not indexed.")
 
-#--maf <deepvariant_vcf>?
+#do not use --cnv-excluded-regions as we have no annotations
 rule sawfish_discover:
     input:
         bam = get_sample_bam_path,
@@ -49,7 +49,8 @@ rule sawfish_discover:
         candidates = directory('SVs/sawfish/{sample}')
     params:
         regions = ','.join(regions),
-        PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else '',
+        PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else '', #depends on where we set the SCC
+        maf = f"--maf {config['small-variants']}" if 'small-variants' in config else '', #if available
         autosomes_regex = r'^(chr)?\d{1,2}$'
     threads: 8
     resources:
