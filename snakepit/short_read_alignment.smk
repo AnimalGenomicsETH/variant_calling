@@ -37,11 +37,15 @@ fastp \
 --html /dev/null
         '''
 
+#need to handle different cases
+#sample.fa.gz.bwt
+#sample.fa.bwt
+#sample.bwt
 rule bwamem2_index:
     input:
         reference = config['reference']
     output:
-        index = temp(multiext(config['reference'],'.0123','.amb','.ann','.bwt.2bit.64','.pac'))
+        index = multiext(str(Path(config['reference']).with_suffix('')),'.0123','.amb','.ann','.bwt.2bit.64','.pac')
     threads: 1
     resources:
         mem_mb = 85000
@@ -55,6 +59,10 @@ rule strobealign_align:
         fastq = rules.fastp_filter.output['fastq']
     output:
         sam = pipe('alignments/{sample}.strobe.sam')
+    threads: 12
+    resources:
+        mem_mb_per_cpu = 3000,
+        runtime = '3h'
     shell:
         '''
 strobealign {input.reference} {input.fastq} -t {threads} > {output.sam}
@@ -62,13 +70,19 @@ strobealign {input.reference} {input.fastq} -t {threads} > {output.sam}
 
 rule bwamem2_align:
     input:
-        index = rules.bwamem2_index.output['index'],
+        index = multiext(str(Path(config['reference']).with_suffix('').with_suffix('')),'.0123','.amb','.ann','.bwt.2bit.64','.pac'),#rules.bwamem2_index.output['index'],
         fastq = rules.fastp_filter.output['fastq']
     output:
         sam = pipe('alignments/{sample}.bwa.sam')
+    params:
+        index = lambda wildcards, input: Path(input['index'][0]).with_suffix('')
+    threads: 24
+    resources:
+        mem_mb_per_cpu = 4000,
+        runtime = '23h'
     shell:
         '''
-bwa-mem2 mem -Y -t {threads} {input.index} {input.fastq} > {output.sam}
+bwa-mem2 mem -Y -t {threads} {params.index} {input.fastq} > {output.sam}
         '''
 
 #NOTE: markdup -S flag marks supplementary alignments of duplicates as duplicates.
