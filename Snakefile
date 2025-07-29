@@ -45,7 +45,7 @@ def get_files():
 
     if 'small' in config.get('targets',[]):
         postprocess_steps = {} #TODO: this is not good
-        for i,step in enumerate(config['variant_postprocess']):
+        for i,step in enumerate(config.get('variant_postprocess',[])):
             if i == 0:
                 postprocess_steps[step] = 'Unrevised'
             else:

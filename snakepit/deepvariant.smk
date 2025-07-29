@@ -6,19 +6,19 @@ def make_custom_example_arguments(model):
     match model:
         case 'WGS':
             if config.get('small_model',False):
-                return '--checkpoint "/opt/models/wgs" --call_small_model_examples --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --trained_small_model_path "/opt/smallmodels/wgs"'
+                return '--checkpoint "/opt/models/wgs" --call_small_model_examples --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --trained_small_model_path "/opt/smallmodels/wgs" --nosmall_model_call_multiallelics'
             else:
                 return '--checkpoint "/opt/models/wgs"'
         case 'PACBIO':
             if config.get('small_model',False):
-                return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
+                return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --small_model_indel_gq_threshold "30" --small_model_snp_gq_threshold "25" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/pacbio" --nosmall_model_call_multiallelics --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
             else:
                 return '--checkpoint "/opt/models/pacbio" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "147" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
         case 'MASSEQ': #no small model implemented
             return '--checkpoint "/opt/models/masseq" --alt_aligned_pileup "diff_channels" --max_reads_for_dynamic_bases_per_region "1500" --max_reads_per_partition "0" --min_mapping_quality "1" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "199" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"'
         case 'ONT_R104':
             if config.get('small_model',False):
-                return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --small_model_indel_gq_threshold "25" --small_model_snp_gq_threshold "20" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/ont_r104" --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"     --vsc_min_fraction_snps "0.08"'
+                return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --call_small_model_examples --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --small_model_indel_gq_threshold "25" --small_model_snp_gq_threshold "20" --small_model_vaf_context_window_size "51" --sort_by_haplotypes --track_ref_reads --trained_small_model_path "/opt/smallmodels/ont_r104" --nosmall_model_call_multiallelics --trim_reads_for_pileup --vsc_min_fraction_indels "0.12"     --vsc_min_fraction_snps "0.08"'
             else:
                 return '--checkpoint "/opt/models/ont_r104" --alt_aligned_pileup "diff_channels" --max_reads_per_partition "600" --min_mapping_quality "5" --parse_sam_aux_fields --partition_size "25000" --phase_reads --pileup_image_width "99" --norealign_reads --sort_by_haplotypes --track_ref_reads --trim_reads_for_pileup --vsc_min_fraction_indels "0.12" --vsc_min_fraction_snps "0.08"'
         case 'RNA' | 'WES' | _: #only valid for v1.4-v1.5
