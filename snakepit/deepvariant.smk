@@ -99,7 +99,7 @@ rule deepvariant_call_variants:
         model = get_checkpoint(config['model'])
     threads: config.get('resources',{}).get('call_variants',{}).get('threads',4)
     resources:
-        mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',5000),
+        mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
         runtime = config.get('resources',{}).get('call_variants',{}).get('runtime','4h'),
     container: config.get('deepvariant_sif')
     shell:
@@ -165,7 +165,7 @@ rule bcftools_scatter:
         runtime = '1h'
     shell:
         '''
-bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} -S {params.region_cols} -x unplaced --no-version
+bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} -S {params.region_cols} --no-version
 for R in {params.regions}
 do 
     bcftools reheader -f {input.fai} $TMPDIR/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
