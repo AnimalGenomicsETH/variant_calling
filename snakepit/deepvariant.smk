@@ -158,7 +158,9 @@ rule bcftools_scatter:
     params:
         regions = ' '.join(regions),
         region_cols = lambda wildcards, input: f"<(cut -f {2 if 'regions' in config else 1} {input.regions})",
-        _dir = lambda wildcards, output: Path(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
+        #_dir = lambda wildcards, output: Path(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
+        #not robust to "dots" in region name, so using this approach
+        _dir = lambda wildcards: f'{wildcards.run}/deepvariant/{wildcards.sample}'
     threads: 2
     resources:
         mem_mb_per_cpu = 2500,
