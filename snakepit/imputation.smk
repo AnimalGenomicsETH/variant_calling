@@ -32,14 +32,14 @@ rule beagle4_imputation:
         fai = f"{config['reference']}.fai"
     output:
         multiext('{run}/{region}.beagle4.vcf.gz','','.tbi')
-    threads: 6
+    threads: 8
     resources:
         mem_mb_per_cpu = 4000,
-        runtime = lambda wildcards, input: '24h' if input.size_mb > 50 else '4h'
+        runtime = lambda wildcards, input: '4h' if input.size_mb > 5 else '1h'
     shell:
         '''
         #add ne for popsize
-        java -jar -Xss25m -Xmx60G /cluster/work/pausch/alex/software/beagle.27Jan18.7e1.jar gl={input} nthreads={threads} out=$TMPDIR/imputed.vcf.gz
+        java -jar -Xss25m -Xmx60G /cluster/work/pausch/alex/software/beagle.27Jan18.7e1.jar gl={input.vcf[0]} nthreads={threads} out=$TMPDIR/imputed.vcf.gz
         bcftools reheader -f {input.fai} -o {output[0]} $TMPDIR/imputed.vcf.gz
         tabix -fp vcf {output[0]}
         '''

@@ -1,16 +1,16 @@
 rule VEP:
     input:
-        vcf = '',
+        vcf = '{run}/all.beagle4.vep.vcf.gz',
         gtf = config['gtf'],
         reference = config['reference']
     output:
-        vcf = multiext('','','.tbi'),
-        stats = ''
+        vcf = multiext('{run}/all.beagle4.vep.vcf.gz','','.tbi'),
+        stats = '{run}/all.beagle4.vep.stats'
     threads: 4
     resources:
         mem_mb_per_cpu = 1500,
         runtime = '4h'
-    container: '/cluster/work/pausch/alex/software/images/ensembl-vep_release_113.0.sif'
+    container: '/cluster/work/pausch/alex/software/images/ensembl-vep_release_114.2.sif'
     shell:
         '''
 vep \

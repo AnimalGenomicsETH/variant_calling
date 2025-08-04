@@ -4,7 +4,8 @@ short_read_data = pl.read_csv(config['short_reads']).rows_by_key(key=["sample"],
 
 rule all:
     input:
-        expand('alignments/{sample}.{aligner}.{ext}',sample=short_read_data,ext='bam',aligner=config.get('aligners','bwa'))
+        expand('alignments/{sample}.{aligner}.{ext}',sample=short_read_data,ext='bam',aligner=config.get('aligners','bwa')),
+        expand('alignments/{sample}.{aligner}.d10.coverage',sample=short_read_data,ext='bam',aligner=config.get('aligners','bwa'))
 
 rule fastp_filter:
     input:
@@ -90,7 +91,8 @@ bwa-mem2 mem -Y -t {threads} {params.index} {input.fastq} > {output.sam}
 #This now selects the alignment code using the "generate_aligner_command" function, and then pipes through samtools.
 rule samtools_markdup:
     input:
-        sam = 'alignments/{sample}.{aligner}.sam'
+        sam = 'alignments/{sample}.{aligner}.sam',
+        reference = lambda wildcards: config['reference'] if wildcards.EXT == 'cram' else []
     output:
         bam = 'alignments/{sample}.{aligner}.{EXT,cram|bam}',
         dedup_stats = 'alignments/{sample}.{aligner}.{EXT}.dedup.stats'
@@ -106,6 +108,23 @@ samtools collate -@ {threads} -O -u {input.sam} |\
 samtools fixmate -@ {threads} -m -u /dev/stdin /dev/stdout |\
 samtools sort -@ {threads} -T $TMPDIR -u |\
 samtools markdup -@ {threads} -T $TMPDIR -S --write-index -f {output.dedup_stats} {params.cram} /dev/stdin {output.bam}
+        '''
+
+rule samtools_bedcov:
+    input:
+        bam = expand(rules.samtools_markdup.output[0],EXT='bam',allow_missing=True),
+        fai = f"{config['reference']}.fai"
+    output:
+        coverage = 'alignments/{sample}.{aligner}.d{depth,\d+}.coverage'
+    threads: 1
+    resources:
+        mem_mb_per_cpu = 7500,
+        runtime = '4h'
+    shell:
+        '''
+samtools bedcov -c -d {wildcards.depth} \
+<(awk -v OFS='\\t' '{{print $1,0,$2}}' {input.fai}) \
+{input.bam} > {output.coverage}
         '''
 
 rule STAR_index:
