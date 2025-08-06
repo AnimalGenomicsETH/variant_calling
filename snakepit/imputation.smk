@@ -1,20 +1,3 @@
-rule bcftools_scatter_X:
-    input:
-        gvcf = 'variants/contigs.Unrevised.vcf.gz'
-    output:
-        expand('variants/contigs/{region}.vcf.gz',region=regions,allow_missing=True),
-        expand('variants/contigs/{region}.vcf.gz.csi',region=regions,allow_missing=True)
-    params:
-        _dir = lambda wildcards, output: PurePath(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
-    threads: 2
-    resources:
-        mem_mb_per_cpu = 2500,
-        runtime = '4h'
-    shell:
-        '''
-        bcftools +scatter {input.gvcf} -o {params._dir} -Oz --threads {threads} --write-index -S <(cut -f 1 all_regions.bed) --no-version
-        '''
-
 #TODO: can we chain filtering steps?
 rule bcftools_filter:
     input:
@@ -26,22 +9,30 @@ rule bcftools_filter:
 bcftools view -i 'QUAL>20' -o {output} {input}
         '''    
 
-rule beagle4_imputation:
+rule beagle_imputation:
     input:
         vcf = multiext('{run}/{region}.Unrevised.vcf.gz','','.tbi'),
         fai = f"{config['reference']}.fai"
     output:
-        multiext('{run}/{region}.beagle4.vcf.gz','','.tbi')
-    threads: 8
+        vcf = multiext('{run}/{region}.{beagle,beagle4|beagle5.vcf.gz','','.tbi')
+    params:
+        ne = 100, #need to use?
+        imputation_tag = 'gl' if wildcards.beagle == 'beagle4' else 'gt'
+    threads: 6
     resources:
-        mem_mb_per_cpu = 4000,
+        mem_mb_per_cpu = 8000,
         runtime = lambda wildcards, input: '4h' if input.size_mb > 5 else '1h'
     shell:
         '''
-        #add ne for popsize
-        java -jar -Xss25m -Xmx60G /cluster/work/pausch/alex/software/beagle.27Jan18.7e1.jar gl={input.vcf[0]} nthreads={threads} out=$TMPDIR/imputed.vcf.gz
-        bcftools reheader -f {input.fai} -o {output[0]} $TMPDIR/imputed.vcf.gz
-        tabix -fp vcf {output[0]}
+        #if there are no variants, beagle errors out ungracefully
+        if [[ $(bcftools index -n {input.vcf[0]}) -gt 0 ]]
+        then
+          {wildcards.beagle} {params.imputation_tag}={input.vcf[0]} nthreads={threads} out=$TMPDIR/imputed
+          bcftools reheader -f {input.fai} -o {output.vcf[0]} $TMPDIR/imputed.vcf.gz
+        else
+          cp {input.vcf[0]} {output.vcf[0]}
+        fi
+        tabix -fp vcf {output.vcf[0]}
         '''
 
-#beagle5
+#bcftools concat --threads 4 --naive-force -o variants_2025/contigs.beagle4.vcf.gz variants_2025/*.beagle4.vcf.gz
