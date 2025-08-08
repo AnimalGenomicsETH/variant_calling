@@ -11,7 +11,7 @@ rule fastp_filter:
     input:
         fastq = lambda wildcards: short_read_data[wildcards.sample]
     output:
-        fastq = expand('fastq/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
+        fastq = temp(expand('fastp/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True))
     params:
         min_quality = 15,
         unqualified = 40,
@@ -71,7 +71,8 @@ strobealign {input.reference} {input.fastq} -t {threads} > {output.sam}
 
 rule bwamem2_align:
     input:
-        index = multiext(str(Path(config['reference']).with_suffix('').with_suffix('')),'.0123','.amb','.ann','.bwt.2bit.64','.pac'),#rules.bwamem2_index.output['index'],
+        index = multiext(config['reference'],'.0123','.amb','.ann','.bwt.2bit.64','.pac'),#rules.bwamem2_index    .output['index'],
+        #index = multiext(str(Path(config['reference']).with_suffix('').with_suffix('')),'.0123','.amb','.ann','.bwt.2bit.64','.pac'),#rules.bwamem2_index.output['index'],
         fastq = rules.fastp_filter.output['fastq']
     output:
         sam = pipe('alignments/{sample}.bwa.sam')

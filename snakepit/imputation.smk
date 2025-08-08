@@ -14,10 +14,10 @@ rule beagle_imputation:
         vcf = multiext('{run}/{region}.Unrevised.vcf.gz','','.tbi'),
         fai = f"{config['reference']}.fai"
     output:
-        vcf = multiext('{run}/{region}.{beagle,beagle4|beagle5.vcf.gz','','.tbi')
+        vcf = multiext('{run}/{region}.{beagle,beagle4|beagle5}.vcf.gz','','.tbi')
     params:
         ne = 100, #need to use?
-        imputation_tag = 'gl' if wildcards.beagle == 'beagle4' else 'gt'
+        imputation_tag = lambda wildcards: 'gl' if wildcards.beagle == 'beagle4' else 'gt'
     threads: 6
     resources:
         mem_mb_per_cpu = 8000,
