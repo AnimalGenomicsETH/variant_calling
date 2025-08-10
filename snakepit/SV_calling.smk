@@ -24,7 +24,6 @@ rule pbsv_call:
     shell:
         'pbsv call --hifi -j {threads} {config[reference]} {input.signatures} {output}'
 
-from pathlib import Path
 ## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
 def get_sample_bam_path(wildcards):
     bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
@@ -40,17 +39,19 @@ def get_sample_bam_path(wildcards):
     raise Exception(f"BAM file ({bam}) is not indexed.")
 
 #do not use --cnv-excluded-regions as we have no annotations
+#--target-region {params.regions} \
 rule sawfish_discover:
     input:
         bam = get_sample_bam_path,
         reference = config['reference'],
-        PAR = config['PAR'] if 'PAR' in config else []
+        PAR = config['PAR'] if 'PAR' in config else [],
+        small_variants = config.get('small-variants')+'{sample}.all.vcf.gz' if 'small-variants' in config else []
     output:
         candidates = directory('SVs/sawfish/{sample}')
     params:
         regions = ','.join(regions),
         PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else '', #depends on where we set the SCC
-        maf = f"--maf {config['small-variants']}" if 'small-variants' in config else '', #if available
+        maf = lambda wildcards, input: f"--maf {input.small_variants}" if 'small-variants' in config else '', #if available
         autosomes_regex = r'^(chr)?\d{1,2}$'
     threads: 8
     resources:
@@ -63,11 +64,11 @@ sawfish discover \
 --output-dir {output} \
 --ref {input.reference} \
 --bam {input.bam[0]} \
---target-region {params.regions} \
 --cov-regex "{params.autosomes_regex}" \
-{params.PAR}
+{params.PAR} {params.maf}
         '''
 
+#--target-region {wildcards.regions} \
 rule sawfish_joint_call:
     input:
         candidates = expand(rules.sawfish_discover.output['candidates'],sample=samples)
@@ -84,7 +85,6 @@ rule sawfish_joint_call:
 sawfish joint-call \
 --threads {threads} \
 --output-dir {output.vcf} \
---target-region {wildcards.region} \
 {params.files}
         '''
 
