@@ -5,8 +5,9 @@ wildcard_constraints:
     region = r'[\w\.]+',
     sample = r'[\w-]+',
     run = r'\w+',
-    filtration = r'Unrevised_filtered|beagle4',
+    filtration = r'Unrevised_filtered',
     N = r'\d+',
+    sharding = r'\d+'
 
 from collections import defaultdict
 def build_regions():
@@ -32,8 +33,8 @@ else:
     ruleorder: deepvariant_postprocess > bcftools_scatter
 
 include: 'snakepit/imputation.smk'
-include: 'snakepit/mendelian.smk'
-include: 'snakepit/SV_calling.smk'
+#include: 'snakepit/mendelian.smk'
+#include: 'snakepit/SV_calling.smk'
 #include: 'snakepit/merfin.smk'
 
 def get_files():
