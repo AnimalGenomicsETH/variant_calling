@@ -39,24 +39,24 @@ def get_sample_bam_path(wildcards):
     raise Exception(f"BAM file ({bam}) is not indexed.")
 
 #do not use --cnv-excluded-regions as we have no annotations
-#--target-region {params.regions} \
+#--target-region {params.regions}
 rule sawfish_discover:
     input:
         bam = get_sample_bam_path,
         reference = config['reference'],
-        PAR = config['PAR'] if 'PAR' in config else [],
-        small_variants = config.get('small-variants')+'{sample}.all.vcf.gz' if 'small-variants' in config else []
+        PAR = lambda wildcards: config['PAR'][wildcards.sample[6]] if 'PAR' in config else [],
+        small_variants = lambda wildcards: config.get('small-variants')+f'{wildcards.sample}.all.vcf.gz' if 'small-variants' in config else []
     output:
         candidates = directory('SVs/sawfish/{sample}')
     params:
         regions = ','.join(regions),
-        PAR = f"--expected-cn {config['PAR']}" if 'PAR' in config else '', #depends on where we set the SCC
+        PAR = lambda wildcards: "--expected-cn " + config['PAR'][wildcards.sample[6]] if 'PAR' in config else '', #depends on where we set the SCC
         maf = lambda wildcards, input: f"--maf {input.small_variants}" if 'small-variants' in config else '', #if available
-        autosomes_regex = r'^(chr)?\d{1,2}$'
-    threads: 8
+        autosomes_regex = r'"^\d+$"'
+    threads: 12
     resources:
-        mem_mb_per_cpu = 17500,
-        runtime = '24h'
+        mem_mb_per_cpu = 6000,
+        runtime = '4h'
     shell:
         '''
 sawfish discover \
@@ -64,7 +64,7 @@ sawfish discover \
 --output-dir {output} \
 --ref {input.reference} \
 --bam {input.bam[0]} \
---cov-regex "{params.autosomes_regex}" \
+--cov-regex {params.autosomes_regex} \
 {params.PAR} {params.maf}
         '''
 
@@ -103,7 +103,7 @@ rule sniffles2_call:
         bam = get_sample_bam_path,
         reference = config['reference'],
         TR = rules.pbsv_predict_tandem_repeats.output['bed'],
-        SV_panel = lambda wildcards: rules.sniffles_filter.output if wildcards.mode == 'forced' else []
+        SV_panel = lambda wildcards: rules.sniffles_merge.output if wildcards.mode == 'forced' else []
     output:
         vcf = 'SVs/sniffles2/{sample}.{mode}.vcf.gz',
         snf = 'SVs/sniffles2/{sample}.{mode}.snf'
