@@ -26,7 +26,10 @@ rule pbsv_call:
 
 ## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
 def get_sample_bam_path(wildcards):
-    bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
+    try:
+        bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
+    except IndexError:
+        pass
     match Path(bam).suffix:
         case '.bam':
             if Path(f"{bam}.bai").exists():
@@ -55,7 +58,7 @@ rule sawfish_discover:
         autosomes_regex = r'"^\d+$"'
     threads: 12
     resources:
-        mem_mb_per_cpu = 6000,
+        mem_mb_per_cpu = 9000,
         runtime = '4h'
     shell:
         '''

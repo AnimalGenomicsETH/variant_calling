@@ -190,7 +190,7 @@ rule GLnexus_merge:
         gvcfs = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',sample=samples,allow_missing=True),
         tbi = expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',sample=samples,allow_missing=True)
     output:
-        bcf = '{run}/{region}.Unrevised.bcf'
+        bcf = temp('{run}/{region}.Unrevised.bcf')
     params:
         preset = lambda wildcards: get_GL_config('Unrevised'),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb_per_cpu']/1024
