@@ -26,10 +26,7 @@ rule pbsv_call:
 
 ## implictly assume indexed bam/cram files, snakemake won't complain but jobs may fail.
 def get_sample_bam_path(wildcards):
-    try:
-        bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
-    except IndexError:
-        pass
+    bam = alignment_metadata.filter(pl.col('sample ID')==wildcards.sample).get_column('bam path').to_list()[0]
     match Path(bam).suffix:
         case '.bam':
             if Path(f"{bam}.bai").exists():
@@ -51,6 +48,8 @@ rule sawfish_discover:
         small_variants = lambda wildcards: config.get('small-variants')+f'{wildcards.sample}.all.vcf.gz' if 'small-variants' in config else []
     output:
         candidates = directory('SVs/sawfish/{sample}')
+    wildcard_constraints:
+        sample = r"(?!cohort)\S+"
     params:
         regions = ','.join(regions),
         PAR = lambda wildcards: "--expected-cn " + config['PAR'][wildcards.sample[6]] if 'PAR' in config else '', #depends on where we set the SCC
@@ -58,7 +57,7 @@ rule sawfish_discover:
         autosomes_regex = r'"^\d+$"'
     threads: 12
     resources:
-        mem_mb_per_cpu = 9000,
+        mem_mb_per_cpu = 12000,
         runtime = '4h'
     shell:
         '''
@@ -81,14 +80,16 @@ rule sawfish_joint_call:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
     threads: 8
     resources:
-        mem_mb_per_cpu = 15000,
-        runtime = '24h'
+        mem_mb_per_cpu = 45000,
+        runtime = '120h'
     shell:
         '''
+ls -d {input} > $TMPDIR/samples.csv
+
 sawfish joint-call \
 --threads {threads} \
 --output-dir {output.vcf} \
-{params.files}
+--sample-csv $TMPDIR/samples.csv
         '''
 
 rule pbsv_predict_tandem_repeats:

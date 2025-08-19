@@ -151,8 +151,8 @@ rule bcftools_scatter:
         regions = config.get('regions',f"{config['reference']}.fai"),
         fai = config['reference'] + ".fai"
     output:
-        expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True),
-        expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True)
+        temp(expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True)),
+        temp(expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True))
     wildcard_constraints:
         region = "(?!all)"
     params:
