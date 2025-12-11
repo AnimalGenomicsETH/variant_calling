@@ -73,9 +73,10 @@ sawfish discover \
 #--target-region {wildcards.regions} \
 rule sawfish_joint_call:
     input:
+        reference = config['reference'],
         candidates = expand(rules.sawfish_discover.output['candidates'],sample=samples)
     output:
-        vcf = directory('SVs/sawfish/cohort_{region}')
+        vcf = directory('SVs/sawfish/cohort')
     params:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
     threads: 8
@@ -89,7 +90,8 @@ ls -d {input} > $TMPDIR/samples.csv
 sawfish joint-call \
 --threads {threads} \
 --output-dir {output.vcf} \
---sample-csv $TMPDIR/samples.csv
+--sample-csv $TMPDIR/samples.csv \
+--ref {input.reference}
         '''
 
 rule pbsv_predict_tandem_repeats:
