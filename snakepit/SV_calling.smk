@@ -79,19 +79,17 @@ rule sawfish_joint_call:
         vcf = directory('SVs/sawfish/cohort')
     params:
         files = lambda wildcards, input: ' '.join(f'--sample {S}' for S in input.candidates),
-    threads: 8
+    threads: 18
     resources:
-        mem_mb_per_cpu = 45000,
-        runtime = '120h'
+        mem_mb_per_cpu = 12500,
+        runtime = '360h'
     shell:
         '''
-ls -d {input} > $TMPDIR/samples.csv
-
 sawfish joint-call \
 --threads {threads} \
 --output-dir {output.vcf} \
---sample-csv $TMPDIR/samples.csv \
---ref {input.reference}
+--ref {input.reference} \
+{params.files}
         '''
 
 rule pbsv_predict_tandem_repeats:
