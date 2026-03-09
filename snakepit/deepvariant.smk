@@ -59,8 +59,7 @@ rule deepvariant_make_examples:
     params:
         examples = lambda wildcards, output: tfrecord_sharded_path(output['examples']),
         gvcf = lambda wildcards, output: tfrecord_sharded_path(output['gvcf']),
-        #model_args = make_custom_example_arguments(config['model']),
-        phasing = lambda wildcards, output: f"--output_phase_info --output_local_read_phasing {Path(output['phasing']).with_suffix('').with_suffix(f'.@{config["shards"]}.tsv')}",
+        phasing = lambda wildcards, output: f"--output_phase_info --output_local_read_phasing {Path(output['phasing']).parent / f'read-phasing_debug@{config["shards"]}.tsv'}" if is_long_read_model() else '',
         small = f'--{"" if config.get("small_model") else "no"}call_small_model_examples',
         model = get_checkpoint(config['model']),
         regions = get_regions
@@ -124,7 +123,7 @@ rule deepvariant_postprocess:
         gvcf = lambda wildcards, input: tfrecord_sharded_path(input.gvcf[0]),
         handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config["PAR_regions"]}"',
         small_model = lambda wildcards, input: f'--small_model_cvo_records {tfrecord_sharded_path(input.small[0])}' if config.get('small_model', False) else '',
-        phasing = lambda wildcards, input: f'--phased_reads_input_path {Path(input.phasing[0]).with_suffix("").with_suffix(f".@{config['shards']}.tsv")}' if is_long_read_model() else '',
+        phasing = lambda wildcards, input: f"--phased_reads_input_path {Path(input['phasing']).parent / f'read-phasing_debug@{config["shards"]}.tsv'}" if is_long_read_model() else '',
         model = get_checkpoint(config['model']),
     threads: get_resource('postprocess', 'threads', 2)
     resources:
