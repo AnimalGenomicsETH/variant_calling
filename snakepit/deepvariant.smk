@@ -137,7 +137,7 @@ rule deepvariant_postprocess:
 --cpus {threads} \
 --infile {params.variants} \
 --outfile {output.vcf[0]} \
---checkpoint_json "{params.model}/model.example_info.json"
+--checkpoint_json {params.model}/model.example_info.json \
 --gvcf_outfile {output.gvcf[0]} \
 --nonvariant_site_tfrecord_path {params.gvcf} \
 --novcf_stats_report \
