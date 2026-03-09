@@ -164,7 +164,7 @@ rule bcftools_scatter:
         runtime = '1h'
     shell:
         '''
-bcftools +scatter {input.gvcf[0]} -o {params._dir} -W -Oz --threads {threads} -S {params.region_cols} --no-version --prefix {wildcards.sample}.
+bcftools +scatter {input.gvcf[0]} -o {params._dir} -W=tbi -Oz --threads {threads} -S {params.region_cols} --no-version --prefix {wildcards.sample}.
 for R in {params._dir}/{wildcards.sample}.*
 do
   mv "${{R}}" "${{R//.vcf.gz/.g.vcf.gz}}"
