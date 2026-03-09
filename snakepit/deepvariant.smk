@@ -1,3 +1,18 @@
+def get_resource(step, key, default):
+    return config.get('resources', {}).get(step, {}).get(key, default)
+
+def shard_expand(pattern, **kwargs):
+    return expand(
+        pattern,
+        sharding=f'{config["shards"]:05}',
+        N=[f'{i:05}' for i in range(config['shards'])],
+        allow_missing=True,
+        **kwargs
+    )
+
+def tfrecord_sharded_path(path):
+    return str(Path(path).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'))
+
 def get_checkpoint(model):
     path = f'/opt/models/'
     match model:
@@ -42,8 +57,8 @@ rule deepvariant_make_examples:
         gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz'),
         json = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz.example_info.json')
     params:
-        examples = lambda wildcards, output: Path(output['examples']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        gvcf = lambda wildcards, output: Path(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
+        examples = lambda wildcards, output: tfrecord_sharded_path(output['examples']),
+        gvcf = lambda wildcards, output: tfrecord_sharded_path(output['gvcf']),
         #model_args = make_custom_example_arguments(config['model']),
         phasing = lambda wildcards, output: f"--output_phase_info --output_local_read_phasing {Path(output['phasing']).with_suffix('').with_suffix(f'.@{config["shards"]}.tsv')}",
         small = f'--{"" if config.get("small_model") else "no"}call_small_model_examples',
@@ -51,8 +66,8 @@ rule deepvariant_make_examples:
         regions = get_regions
     threads: 1
     resources:
-        mem_mb_per_cpu = config.get('resources',{}).get('make_examples',{}).get('mem_mb',6000),
-        runtime = config.get('resources',{}).get('make_examples',{}).get('runtime','4h'),
+        mem_mb_per_cpu = get_resource('make_examples', 'mem_mb', 6000),
+        runtime = get_resource('make_examples', 'runtime', '4h'),
     container: config.get('deepvariant_sif')
     shell:
         '''
@@ -74,17 +89,17 @@ rule deepvariant_make_examples:
 
 rule deepvariant_call_variants:
     input:
-        examples = expand(rules.deepvariant_make_examples.output['examples'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
-        json = expand(rules.deepvariant_make_examples.output['json'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True)
+        examples = shard_expand(rules.deepvariant_make_examples.output['examples']),
+        json = shard_expand(rules.deepvariant_make_examples.output['json'])
     output:
         temp('{run}/deepvariant/intermediate_results_{sample}_{region}/call_variants_output-00000-of-00001.tfrecord.gz')
     params:
-        examples = lambda wildcards, input: Path(input['examples'][0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
+        examples = lambda wildcards, input: tfrecord_sharded_path(input['examples'][0]),
         model = get_checkpoint(config['model'])
-    threads: config.get('resources',{}).get('call_variants',{}).get('threads',4)
+    threads: get_resource('call_variants', 'threads', 4)
     resources:
-        mem_mb_per_cpu = config.get('resources',{}).get('call_variants',{}).get('mem_mb',1500),
-        runtime = config.get('resources',{}).get('call_variants',{}).get('runtime','4h'),
+        mem_mb_per_cpu = get_resource('call_variants', 'mem_mb', 1500),
+        runtime = get_resource('call_variants', 'runtime', '4h'),
     container: config.get('deepvariant_sif')
     shell:
         '''
@@ -98,23 +113,23 @@ rule deepvariant_postprocess:
     input:
         reference = multiext(config['reference'],'','.fai'),
         variants = rules.deepvariant_call_variants.output[0],
-        gvcf = expand(rules.deepvariant_make_examples.output['gvcf'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
-        small = expand(rules.deepvariant_make_examples.output['small'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
-        phasing = expand(rules.deepvariant_make_examples.output['phasing'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
+        gvcf = shard_expand(rules.deepvariant_make_examples.output['gvcf']),
+        small = shard_expand(rules.deepvariant_make_examples.output['small']),
+        phasing = shard_expand(rules.deepvariant_make_examples.output['phasing']),
     output:
         vcf = multiext('{run}/deepvariant/{sample}.{region}.vcf.gz','','.tbi'),
         gvcf = multiext('{run}/deepvariant/{sample}.{region}.g.vcf.gz','','.tbi')
     params:
         variants = lambda wildcards,input: Path(input.variants).with_name('call_variants_output@1.tfrecord.gz'),
-        gvcf = lambda wildcards,input: Path(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"',
-        small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.small[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config.get('small_model',False) else '',
+        gvcf = lambda wildcards, input: tfrecord_sharded_path(input.gvcf[0]),
+        handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config["PAR_regions"]}"',
+        small_model = lambda wildcards, input: f'--small_model_cvo_records {tfrecord_sharded_path(input.small[0])}' if config.get('small_model', False) else '',
         phasing = lambda wildcards, input: f'--phased_reads_input_path {Path(input.phasing[0]).with_suffix("").with_suffix(f".@{config['shards']}.tsv")}' if is_long_read_model() else '',
         model = get_checkpoint(config['model']),
-    threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
+    threads: get_resource('postprocess', 'threads', 2)
     resources:
-        mem_mb_per_cpu = config.get('resources',{}).get('postprocess',{}).get('mem_mb',5000),
-        runtime = config.get('resources',{}).get('postprocess',{}).get('runtime','4h'),
+        mem_mb_per_cpu = get_resource('postprocess', 'mem_mb', 5000),
+        runtime = get_resource('postprocess', 'runtime', '4h'),
     container: config.get('deepvariant_sif')
     shell:
         '''
@@ -145,8 +160,6 @@ rule bcftools_scatter:
     params:
         regions = ' '.join(regions),
         region_cols = lambda wildcards, input: f"<(cut -f {2 if 'regions' in config else 1} {input.regions})",
-        #_dir = lambda wildcards, output: Path(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
-        #not robust to "dots" in region name, so using this approach
         _dir = lambda wildcards: f'{wildcards.run}/deepvariant/{wildcards.sample}'
     threads: 2
     resources:
@@ -181,10 +194,10 @@ rule GLnexus_merge:
     params:
         preset = lambda wildcards: get_GL_config('Unrevised'),
         mem = lambda wildcards,threads,resources: threads*resources['mem_mb_per_cpu']/1024
-    threads: config.get('resources',{}).get('merge',{}).get('threads',4),
+    threads: get_resource('merge', 'threads', 4),
     resources:
-        mem_mb_per_cpu = config.get('resources',{}).get('merge',{}).get('mem_mb',6000),
-        runtime = config.get('resources',{}).get('merge',{}).get('walltime','4h')
+        mem_mb_per_cpu = get_resource('merge', 'mem_mb', 6000),
+        runtime = get_resource('merge', 'walltime', '4h')
     container: config.get('glnexus_sif')
     shell:
         '''
