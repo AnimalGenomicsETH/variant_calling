@@ -151,27 +151,23 @@ rule bcftools_scatter:
         regions = config.get('regions',f"{config['reference']}.fai"),
         fai = config['reference'] + ".fai"
     output:
-        temp(expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True)),
-        temp(expand('{run}/deepvariant/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True))
+        gvcf = temp(expand('{run}/deepvariant/scatter/{sample}.{region}.g.vcf.gz',region=regions,allow_missing=True)),
+        tbi = temp(expand('{run}/deepvariant/scatter/{sample}.{region}.g.vcf.gz.tbi',region=regions,allow_missing=True))
     wildcard_constraints:
         region = "(?!all)"
     params:
-        regions = ' '.join(regions),
         region_cols = lambda wildcards, input: f"<(cut -f {2 if 'regions' in config else 1} {input.regions})",
-        #_dir = lambda wildcards, output: Path(output[0]).with_suffix('').with_suffix('').with_suffix('').with_suffix('')
-        #not robust to "dots" in region name, so using this approach
-        _dir = lambda wildcards: f'{wildcards.run}/deepvariant/{wildcards.sample}'
+        _dir = lambda wildcards, output: Path(output['gvcf']).parent
     threads: 2
     resources:
         mem_mb_per_cpu = 2500,
         runtime = '1h'
     shell:
         '''
-bcftools +scatter {input.gvcf[0]} -o $TMPDIR -Oz --threads {threads} -S {params.region_cols} --no-version
-for R in {params.regions}
-do 
-    bcftools reheader -f {input.fai} $TMPDIR/$R.vcf.gz > {params._dir}.$R.g.vcf.gz
-    tabix -p vcf {params._dir}.$R.g.vcf.gz
+bcftools +scatter {input.gvcf[0]} -o {params._dir} -W -Oz --threads {threads} -S {params.region_cols} --no-version --prefix {wildcards.sample}.
+for R in {params._dir}/{wildcards.sample}.*
+do
+  mv "${{R}}" "${{R//.vcf.gz/.g.vcf.gz}}"
 done
         '''
 
