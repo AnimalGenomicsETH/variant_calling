@@ -1,6 +1,17 @@
 #NOTE: may need to be updated if deepvariant changes its internal parameters.
 #e.g., running Apptainer> run_deepvariant  --model_type ONT_R104 --ref GL_DV_raw.yml --reads README.md --output_vcf test --num_shards 10 --intermediate_results_dir inter --dry_run --disable_small_model=true
 
+## TODO:
+# continuous phasing 
+# --make_examples_extra_args="phase_reads=true,output_phase_info=true,output_local_read_phasing=/tmp/read-phasing_debug@${N_SHARDS}.tsv" \
+# --postprocess_variants_extra_args="phased_reads_input_path=/tmp/read-phasing_debug@${N_SHARDS}.tsv"
+
+# make examples uses  --checkpoint "/opt/models/pacbio" \, remove custom args
+
+# Use RNA-seq as first class
+
+# How to use small model 
+
 #use_multiallelic_model?
 def make_custom_example_arguments(model):
     match model:
@@ -27,7 +38,7 @@ def make_custom_example_arguments(model):
 def get_checkpoint(model):
     path = f'/opt/models/'
     match model:
-        case 'PACBIO' | 'MASSEQ' | 'WGS' | 'ONT_R104' :
+        case 'PACBIO' | 'MASSEQ' | 'WGS' | 'ONT_R104' | 'RNASEQ':
             return path + model.lower()
         case 'hybrid':
             return path + 'hybrid_pacbio_illumina'
@@ -61,12 +72,16 @@ rule deepvariant_make_examples:
     output:
         examples = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz'),
         small = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples_call_variant_outputs.tfrecord-{N}-of-{sharding}.gz') if config.get('small_model',False) else [],
+        phasing = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/read-phasing_debug-{N}-of-{sharding}.tsv" ') if config.get('small_model',False) else [],
         gvcf = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/gvcf.tfrecord-{N}-of-{sharding}.gz'),
         json = temp('{run}/deepvariant/intermediate_results_{sample}_{region}/make_examples.tfrecord-{N}-of-{sharding}.gz.example_info.json')
     params:
         examples = lambda wildcards, output: Path(output['examples']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         gvcf = lambda wildcards, output: Path(output['gvcf']).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
-        model_args = make_custom_example_arguments(config['model']),
+        #model_args = make_custom_example_arguments(config['model']),
+        phasing = lambda wildcards, output: '--output_phase_info --output_local_read_phasing Path(output['gvcf']).with_suffix('').with_suffix(f'.@{config["shards"]}.tsv'),
+        small = f'--{"" if config.get("small_model)" else "no"}call_small_model_examples'
+        model = get_checkpoint(config['model']),
         regions = get_regions
     threads: 1
     resources:
@@ -79,12 +94,15 @@ rule deepvariant_make_examples:
 --mode calling \
 --ref {input.reference[0]} \
 --include_med_dp \
+--checkpoint {params.model} \
+--checkpoint_json "{params.model}/model.example_info.json"
 --reads {input.bam[0]} \
 --examples {params.examples} \
 --gvcf {params.gvcf} \
 --sample_name {wildcards.sample} \
 {params.regions} \
-{params.model_args} \
+{params.phasing} \
+{params.small} \
 --task {wildcards.N}
         '''
 
@@ -110,12 +128,15 @@ rule deepvariant_call_variants:
 --checkpoint {params.model}
         '''
 
+#postprocess_variants_extra_args="phased_reads_input_path=/tmp/read-phasing_debug@${N_SHARDS}.tsv"
+#TODO: drop outdated support since RNA-seq is updated now
 rule deepvariant_postprocess:
     input:
         reference = multiext(config['reference'],'','.fai'),
         variants = rules.deepvariant_call_variants.output[0],
         gvcf = expand(rules.deepvariant_make_examples.output['gvcf'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
-        small = expand(rules.deepvariant_make_examples.output['small'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True)
+        small = expand(rules.deepvariant_make_examples.output['small'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
+        phasing = expand(rules.deepvariant_make_examples.output['phasing'],sharding=f'{config["shards"]:05}',N=[f'{i:05}' for i in range(config['shards'])],allow_missing=True),
     output:
         vcf = multiext('{run}/deepvariant/{sample}.{region}.vcf.gz','','.tbi'),
         gvcf = multiext('{run}/deepvariant/{sample}.{region}.g.vcf.gz','','.tbi')
@@ -124,6 +145,8 @@ rule deepvariant_postprocess:
         gvcf = lambda wildcards,input: Path(input.gvcf[0]).with_suffix('').with_suffix(f'.tfrecord@{config["shards"]}.gz'),
         handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config['PAR_regions']}"',
         small_model = lambda wildcards, input: f'--small_model_cvo_records {Path(input.small[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config.get('small_model',False) else '',
+        phasing = lambda wildcards, input: f'--phased_reads_input_path {Path(input.phasing[0]).with_suffix("").with_suffix(f".tfrecord@{config['shards']}.gz")}' if config['model'] == 'PACBIO' else '',
+        model = get_checkpoint(config['model']),
         #this is a workaround to allow older versions without parallel postprocessing to not complain
         cpus = lambda wildcards, threads: f'--cpus {threads}' if config.get('resources',{}).get('postprocess',{}).get('threads',1) > 1 else ''
     threads: config.get('resources',{}).get('postprocess',{}).get('threads',2)
@@ -137,10 +160,12 @@ rule deepvariant_postprocess:
 --ref {input.reference[0]} \
 --infile {params.variants} \
 --outfile {output.vcf[0]} \
+--checkpoint_json "{params.model}/model.example_info.json"
 --gvcf_outfile {output.gvcf[0]} \
 --nonvariant_site_tfrecord_path {params.gvcf} \
 --novcf_stats_report \
 {params.small_model} \
+{oarams.phasing} \
 {params.handle_sex_chromosomes} \
 {params.cpus}
         '''
