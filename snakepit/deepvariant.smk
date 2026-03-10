@@ -157,7 +157,7 @@ rule bcftools_scatter:
         region = "(?!all)"
     params:
         region_cols = lambda wildcards, input: f"<(cut -f {2 if 'regions' in config else 1} {input.regions})",
-        _dir = lambda wildcards, output: Path(output['gvcf']).parent
+        _dir = lambda wildcards, output: Path(output['gvcf'][0]).parent
     threads: 2
     resources:
         mem_mb_per_cpu = 2500,
