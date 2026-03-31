@@ -11,7 +11,7 @@ rule fastp_filter:
     input:
         fastq = lambda wildcards: short_read_data[wildcards.sample]
     output:
-        fastq = temp(expand('fastp/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True))
+        fastq = expand('fastp/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
     params:
         min_quality = 15,
         unqualified = 40,
@@ -63,7 +63,7 @@ rule strobealign_align:
     threads: 12
     resources:
         mem_mb_per_cpu = 3000,
-        runtime = '3h'
+        runtime = '4h'
     shell:
         '''
 strobealign {input.reference} {input.fastq} -t {threads} > {output.sam}
@@ -116,7 +116,7 @@ rule samtools_bedcov:
         bam = expand(rules.samtools_markdup.output[0],EXT='bam',allow_missing=True),
         fai = f"{config['reference']}.fai"
     output:
-        coverage = 'alignments/{sample}.{aligner}.d{depth,\d+}.coverage'
+        coverage = 'alignments/{sample}.{aligner}.d{depth,\\d+}.coverage'
     threads: 1
     resources:
         mem_mb_per_cpu = 7500,

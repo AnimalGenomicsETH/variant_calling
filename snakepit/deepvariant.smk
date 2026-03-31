@@ -123,7 +123,7 @@ rule deepvariant_postprocess:
         gvcf = lambda wildcards, input: tfrecord_sharded_path(input.gvcf[0]),
         handle_sex_chromosomes = '' if 'PAR_regions' not in config else f'--haploid_contigs "X,Y" --par_regions_bed "{config["PAR_regions"]}"',
         small_model = lambda wildcards, input: f'--small_model_cvo_records {tfrecord_sharded_path(input.small[0])}' if config.get('small_model', False) else '',
-        phasing = lambda wildcards, input: f"--phased_reads_input_path {Path(input['phasing']).parent / f'read-phasing_debug@{config["shards"]}.tsv'}" if is_long_read_model() else '',
+        phasing = lambda wildcards, input: f"--phased_reads_input_path {Path(input['phasing'][0]).parent / f'read-phasing_debug@{config["shards"]}.tsv'}" if is_long_read_model() else '',
         model = get_checkpoint(config['model']),
     threads: get_resource('postprocess', 'threads', 2)
     resources:
