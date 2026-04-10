@@ -86,6 +86,7 @@ rule deepvariant_make_examples:
 --task {wildcards.N}
         '''
 
+#look into increasing --batch_size from 1024 as mem usage is already low
 rule deepvariant_call_variants:
     input:
         examples = shard_expand(rules.deepvariant_make_examples.output['examples']),
@@ -194,7 +195,7 @@ rule GLnexus_merge:
     threads: get_resource('merge', 'threads', 4),
     resources:
         mem_mb_per_cpu = get_resource('merge', 'mem_mb', 6000),
-        runtime = get_resource('merge', 'walltime', '4h')
+        runtime = get_resource('merge', 'runtime', '4h')
     container: config.get('glnexus_sif')
     shell:
         '''
