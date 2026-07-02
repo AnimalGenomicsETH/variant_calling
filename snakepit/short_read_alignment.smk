@@ -7,11 +7,31 @@ rule all:
         expand('alignments/{sample}.{aligner}.{ext}',sample=short_read_data,ext='bam',aligner=config.get('aligners','bwa')),
         expand('alignments/{sample}.{aligner}.d10.coverage',sample=short_read_data,ext='bam',aligner=config.get('aligners','bwa'))
 
+wildcard_constraints:
+    aligner='bwa|strobe|minibwa|STAR'
+
+rule chelea_filter:
+    input:
+        fastq=lambda wildcards: short_read_data[wildcards.sample]
+    output:
+        fastq=expand('trimmed/{sample}.R{N}.chelea.fastq.gz',N=(1,2),allow_missing=True)
+    params:
+        RNA_trim='--trim-polyx'
+    threads: 4
+    resources:
+        mem_mb_per_cpu = 2500,
+        runtime='4h'
+    shell:
+        '''
+chelae trim --inputs {input.fastq} --outputs {output.fastq} --threads {threads} \
+--filter-length 50
+        '''
+
 rule fastp_filter:
     input:
         fastq = lambda wildcards: short_read_data[wildcards.sample]
     output:
-        fastq = expand('fastp/{sample}.R{N}.fastq.gz',N=(1,2),allow_missing=True)
+        fastq = expand('trimmed/{sample}.R{N}.fastp.fastq.gz',N=(1,2),allow_missing=True)
     params:
         min_quality = 15,
         unqualified = 40,
@@ -49,9 +69,39 @@ rule bwamem2_index:
         index = multiext(str(Path(config['reference']).with_suffix('')),'.0123','.amb','.ann','.bwt.2bit.64','.pac')
     threads: 1
     resources:
-        mem_mb = 85000
+        mem_mb_per_cpu = 85000
     shell:
         'bwa-mem2 index {input.reference}'
+
+rule minibwa_index:
+    input:
+        fasta = config['reference']
+    output:
+        index = multiext("index",'.l2b','.mbw')
+    threads: 4
+    resources:
+        mem_mb_per_cpu = 20000
+    shell:
+        '''
+minibwa index -t {threads} {input.fasta} index
+        '''
+
+rule minibwa_align:
+    input:
+        index=rules.minibwa_index.output['index'],
+        fastq=rules.chelea_filter.output['fastq']
+    output:
+        sam = pipe('alignments/{sample}.minibwa.sam')
+    params:
+        index=lambda wildcards, input: Path(input['index'][0]).with_suffix('')
+    threads: 12
+    resources:
+        mem_mb_per_cpu = 4000,
+        runtime = '4h'
+    shell:
+        '''
+minibwa map -t {threads} -x sr {params.index} {input.fastq} > {output.sam}
+        '''
 
 #Strobealign is quick to index on the fly and removes read-length dependency
 rule strobealign_align:
