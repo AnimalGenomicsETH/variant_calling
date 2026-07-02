@@ -92,13 +92,15 @@ rule minibwa_align:
         fastq=rules.chelea_filter.output['fastq']
     output:
         sam = pipe('alignments/{sample}.minibwa.sam')
+    params:
+        index=lambda wildcards, input: Path(input['index'][0]).with_suffix('')
     threads: 12
     resources:
         mem_mb_per_cpu = 4000,
         runtime = '4h'
     shell:
         '''
-minibwa map -t {threads} -x sr {input.index} {input.fastq} > {output.sam}
+minibwa map -t {threads} -x sr {params.index} {input.fastq} > {output.sam}
         '''
 
 #Strobealign is quick to index on the fly and removes read-length dependency
